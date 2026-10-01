@@ -980,8 +980,15 @@ async function loadStats() {
     // (separate from seasonId, using the season as a URL param instead when possible).
     // If the date cayenneExp also fails, season totals are returned as fallback.
 
-    // NHL API caps at 100 rows per page — paginate until exhausted.
-    // direction=desc (lowercase) required; 'DESC' is silently ignored.
+    // NHL API caps at 100 rows per page and sorts ascending by points by default —
+    // direction=desc/DESC is silently ignored. Strategy:
+    //   1. Fetch page 0 to learn the total player count.
+    //   2. If total ≤ 400, fetch all pages from the start.
+    //   3. If total > 400, fetch the last 400 rows (highest points) by offsetting
+    //      into the tail of the ascending list.
+    // The client-side sort then puts the highest-point players at the top.
+    const TARGET = 400;
+
     const buildPageUrl = (pageStart) => {
       let cayenne;
       if (isCareer)       cayenne = null;
@@ -994,20 +1001,39 @@ async function loadStats() {
     };
 
     let splits = [];
-    let pageStart = 0;
-    DOM.status.textContent = 'Fetching page 1…';
+    DOM.status.textContent = 'Fetching players…';
     try {
-      while (true) {
-        console.log('[NHL] Fetching start=' + pageStart);
-        const resp = await fetchWithFallback(buildPageUrl(pageStart));
-        const page = (resp && resp.data) || [];
-        splits = splits.concat(page);
-        DOM.status.textContent = 'Loading… ' + splits.length + ' players';
-        if (page.length < 100) break;
-        pageStart += 100;
-        if (splits.length >= 2000) break;
+      // First request reveals the full population size via response.total
+      const firstResp = await fetchWithFallback(buildPageUrl(0));
+      const total     = (firstResp && firstResp.total) || 0;
+      const firstPage = (firstResp && firstResp.data)  || [];
+      console.log('[NHL] Total players available:', total);
+
+      if (total <= TARGET) {
+        // Fewer than TARGET total — fetch every page from the start
+        splits = firstPage;
+        let s = 100;
+        while (s < total) {
+          const r    = await fetchWithFallback(buildPageUrl(s));
+          const page = (r && r.data) || [];
+          splits = splits.concat(page);
+          DOM.status.textContent = 'Loading… ' + splits.length + ' / ' + total + ' players';
+          if (page.length < 100) break;
+          s += 100;
+        }
+      } else {
+        // More than TARGET total — fetch only the last TARGET rows.
+        // Because the API sorts ascending, the tail = highest-scoring players.
+        const startAt = total - TARGET;
+        for (let s = startAt; s < total; s += 100) {
+          const r    = await fetchWithFallback(buildPageUrl(s));
+          const page = (r && r.data) || [];
+          splits = splits.concat(page);
+          DOM.status.textContent = 'Loading… ' + splits.length + ' players';
+          if (page.length < 100) break;
+        }
       }
-      console.log('[NHL] Total after pagination:', splits.length);
+      console.log('[NHL] Loaded', splits.length, 'players (total available:', total + ')');
     } catch(restErr) {
       console.warn('[NHL] REST failed:', restErr.message);
     }
