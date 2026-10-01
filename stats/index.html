@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NHL Points Leaders</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --navy:   #0b5d4b;
+    --red:    #d50032;
+    --bg:     #F5EFE3;
+    --surface:#ffffff;
+    --border: #dde1e7;
+    --text:   #1a1a2e;
+    --muted:  #6b7280;
+    --hover-row: #f0f4fa;
+  }
+
+  body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+  }
+
+  /* ── Header (matches mlb-lineups.html exactly) ── */
+  header { background: #0b5d4b; color: white; padding: 0; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+  .header-inner { max-width: 1200px; margin: 0 auto; padding: 21px 16px; display: flex; align-items: center; gap: 16px; }
+  .mlb-logo { font-size: 22px; font-weight: 900; letter-spacing: -0.5px; color: white; text-decoration: none; }
+  .mlb-logo span { color: #d50032; }
+  .header-title { font-size: 14px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; opacity: 0.85; }
+
+  /* ── Page shell ─────────────────────────────── */
+  .page { max-width: 1400px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  .page-heading {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    margin-bottom: 22px; flex-wrap: wrap; gap: 12px;
+  }
+  .page-title { font-size: 26px; font-weight: 800; color: var(--navy); letter-spacing: -0.4px; }
+  .page-sub   { font-size: 13px; color: #3b214a; margin-top: 3px; font-weight: 500; }
+
+  /* ── Filter bar ─────────────────────────────── */
+  .filter-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .filter-group { display: flex; flex-direction: column; gap: 3px; }
+  .filter-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #3b214a; }
+  .filter-select {
+    font-size: 13px; padding: 7px 28px 7px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: #F5EFE3 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E") no-repeat right 10px center;
+    background-size: 10px; appearance: none;
+    color: var(--text); cursor: pointer; font-family: inherit; min-width: 120px;
+  }
+  .filter-select:focus { outline: 2px solid var(--navy); outline-offset: 1px; }
+  .filter-sep { width: 1px; height: 36px; background: var(--border); flex-shrink: 0; margin: 0 2px; }
+
+  /* ── Multi-select team dropdown ─────────────── */
+  .ms-wrap { position: relative; min-width: 148px; }
+  .ms-trigger {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    font-size: 13px; padding: 7px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: #F5EFE3; color: var(--text);
+    cursor: pointer; user-select: none; white-space: nowrap;
+    font-family: inherit;
+  }
+  .ms-trigger:focus { outline: 2px solid var(--navy); outline-offset: 1px; }
+  .ms-trigger.open { border-color: var(--navy); }
+  .ms-trigger .ms-arrow { font-size: 9px; color: var(--muted); flex-shrink: 0; transition: transform 0.15s; }
+  .ms-trigger.open .ms-arrow { transform: rotate(180deg); }
+
+  .ms-panel {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0;
+    background: #F5EFE3; border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12); z-index: 500;
+    min-width: 210px; max-height: 280px; overflow: hidden;
+    flex-direction: column;
+  }
+  .ms-panel.open { display: flex; }
+  .ms-search {
+    padding: 8px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .ms-search input {
+    width: 100%; border: 1px solid var(--border); border-radius: 5px;
+    padding: 5px 8px; font-size: 12px; font-family: inherit; color: var(--text);
+    outline: none;
+  }
+  .ms-search input:focus { border-color: var(--navy); }
+  .ms-actions {
+    display: flex; gap: 0; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .ms-actions button {
+    flex: 1; padding: 5px 8px; font-size: 11px; font-weight: 600;
+    background: none; border: none; cursor: pointer; color: var(--navy);
+    font-family: inherit; transition: background 0.1s;
+  }
+  .ms-actions button:hover { background: #f0f4fa; }
+  .ms-actions button:first-child { border-right: 1px solid var(--border); }
+  .ms-list { overflow-y: auto; flex: 1; padding: 4px 0; }
+  .ms-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+    transition: background 0.1s;
+  }
+  .ms-item:hover { background: #f0f4fa; }
+  .ms-item input[type=checkbox] { accent-color: var(--navy); width: 13px; height: 13px; flex-shrink: 0; cursor: pointer; }
+  .ms-item label { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .load-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--navy); color: white; border: none;
+    padding: 8px 18px; border-radius: 6px; font-size: 13px;
+    font-weight: 600; cursor: pointer;
+    transition: background 0.14s, transform 0.1s;
+    letter-spacing: 0.1px; white-space: nowrap; align-self: flex-end;
+  }
+  .load-btn:hover { background: #3b214a; }
+  .load-btn:active { transform: scale(0.97); }
+  .load-btn.loading { opacity: 0.6; pointer-events: none; }
+  .load-btn.loading svg { animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Status bar ─────────────────────────────── */
+  .status-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px; min-height: 22px; flex-wrap: wrap; gap: 8px;
+  }
+  .status-text { font-size: 12px; color: #3b214a; }
+  .status-text.error { color: #dc2626; }
+  .row-count { font-size: 12px; color: #3b214a; font-weight: 500; }
+
+  /* ── Table wrapper ──────────────────────────── */
+  .table-wrap {
+    background: #F5EFE3; border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  .table-scroll { overflow-x: auto; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+
+  /* Sticky rank + player columns */
+  thead th:nth-child(1), tbody td:nth-child(1) { position: sticky; left: 0; z-index: 2; background: inherit; }
+  thead th:nth-child(2), tbody td:nth-child(2) { position: sticky; left: 46px; z-index: 2; background: inherit; box-shadow: 2px 0 5px rgba(0,0,0,0.05); }
+  thead { position: sticky; top: 0; z-index: 10; }
+  thead tr { background: var(--navy); color: white; }
+
+  thead th {
+    padding: 10px 12px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px; text-align: center;
+    cursor: pointer; user-select: none; white-space: nowrap;
+    transition: background 0.12s; border-right: 1px solid rgba(255,255,255,0.08);
+  }
+  thead th:last-child { border-right: none; }
+  thead th:nth-child(1) { background: var(--navy); }
+  thead th:nth-child(2) { text-align: left; min-width: 200px; background: var(--navy); }
+  thead th:hover { background: #3b214a; }
+  thead th.sorted { background: #3b214a; }
+  thead th .sort-icon { display: inline-block; margin-left: 4px; opacity: 0.5; font-size: 9px; }
+  thead th.sorted .sort-icon { opacity: 1; }
+
+  .col-sorted { background: #f3eff7 !important; }
+
+  tbody tr { border-bottom: 1px solid #f0f2f5; transition: background 0.1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover td { background: var(--hover-row) !important; }
+  tbody td { padding: 9px 12px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+  tbody td:nth-child(2) { text-align: left; }
+
+  .col-rank { font-size: 12px; font-weight: 700; color: var(--muted); width: 46px; min-width: 46px; }
+
+  .player-cell { display: flex; align-items: center; gap: 10px; min-width: 200px; }
+  .player-photo {
+    width: 36px; height: 36px; border-radius: 50%; object-fit: cover;
+    border: 1.5px solid var(--border); background: #e5e7eb; flex-shrink: 0;
+  }
+  .player-info { display: flex; flex-direction: column; min-width: 0; }
+  .player-name {
+    font-weight: 700; font-size: 13px; color: var(--text);
+    text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .player-name:hover { color: var(--navy); text-decoration: underline; }
+  .player-pos-badge {
+    font-size: 10px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px;
+  }
+
+  .col-num { font-size: 13px; font-weight: 800; color: var(--navy); min-width: 44px; letter-spacing: -0.5px; }
+
+  .team-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 70px; justify-content: center; }
+  .team-logo { width: 22px; height: 22px; object-fit: contain; flex-shrink: 0; }
+  .team-abbr { font-size: 12px; font-weight: 700; color: var(--text); }
+
+  .stat-val { color: var(--text); }
+  .stat-highlight { font-weight: 700; color: var(--navy); }
+  td.col-sorted { font-weight: 700; }
+  .pct-val { font-variant-numeric: tabular-nums; }
+
+  /* ── Footer / load more ─────────────────────── */
+  .table-footer { padding: 16px; text-align: center; border-top: 1px solid var(--border); background: #F5EFE3; }
+  .more-btn {
+    background: none; border: 1.5px solid var(--navy); color: var(--navy);
+    padding: 8px 24px; border-radius: 6px; font-size: 13px; font-weight: 700;
+    cursor: pointer; transition: background 0.13s, color 0.13s;
+  }
+  .more-btn:hover { background: var(--navy); color: white; }
+  .more-btn:disabled { opacity: 0.4; pointer-events: none; }
+
+  /* ── Skeleton ───────────────────────────────── */
+  .skeleton {
+    background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+    background-size: 200% 100%; animation: shimmer 1.2s infinite;
+    border-radius: 4px; display: inline-block;
+  }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  /* ── Empty / error state ────────────────────── */
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+  .empty-state code { background: #f3f4f6; padding: 3px 7px; border-radius: 4px; font-size: 12px; color: var(--text); }
+
+  /* ── Player tooltip (matches mlb-lineups.html) ── */
+  .player-tooltip {
+    display: none; position: fixed; background: #3b214a; color: white;
+    border-radius: 7px; padding: 4px 6px; font-size: 11px; font-weight: 500;
+    white-space: nowrap; z-index: 9999; pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25); gap: 8px; align-items: center;
+  }
+  .player-tooltip.visible { display: flex; }
+  .tooltip-hits { display: flex; gap: 5px; align-items: center; margin-left: 4px; }
+  .tooltip-hit {
+    display: flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 3px;
+    background: rgba(255,255,255,0.15); font-size: 10px; font-weight: 700;
+  }
+  .tooltip-dob { opacity: 0.85; }
+  .tooltip-frac { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.15; font-size: 10px; }
+  .tooltip-frac .tn { font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.5); width: 100%; text-align: center; padding-bottom: 1px; opacity: 0.85; }
+  .tooltip-frac .td { opacity: 0.85; padding-top: 1px; }
+
+  /* ── Responsive ─────────────────────────────── */
+  @media (max-width: 640px) {
+    .page { padding: 16px 10px 40px; }
+    .page-title { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Header (matches mlb-lineups.html) ── -->
+<header>
+  <div class="header-inner"></div>
+</header>
+
+<!-- ── Page ── -->
+<div class="page">
+  <div class="page-heading">
+    <div>
+      <h1 class="page-title">Skater Statistics</h1>
+      <div class="page-sub" id="page-sub">Sorted by Points &mdash; Regular Season</div>
+    </div>
+  </div>
+
+  <div class="filter-bar">
+    <div class="filter-group">
+      <span class="filter-label">Season</span>
+      <select class="filter-select" id="season-select"></select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Team</span>
+      <div class="ms-wrap" id="team-ms">
+        <div class="ms-trigger" id="team-trigger" tabindex="0"
+          onclick="toggleTeamDropdown()" onkeydown="if(event.key==='Enter'||event.key===' ')toggleTeamDropdown()">
+          <span id="team-trigger-label">All Teams</span>
+          <span class="ms-arrow">▼</span>
+        </div>
+        <div class="ms-panel" id="team-panel">
+          <div class="ms-search"><input type="text" placeholder="Search teams…" id="team-search" oninput="filterTeamList(this.value)" onclick="event.stopPropagation()"></div>
+          <div class="ms-actions">
+            <button onclick="selectAllTeams()">Select All</button>
+            <button onclick="clearTeams()">Clear</button>
+          </div>
+          <div class="ms-list" id="team-list"></div>
+        </div>
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Position</span>
+      <select class="filter-select" id="pool-select">
+        <option value="">All Skaters</option>
+        <option value="F">Forwards</option>
+        <option value="D">Defensemen</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Stat Type</span>
+      <select class="filter-select" id="stat-type-select">
+        <option value="season">Season</option>
+        <option value="last7">Last 7 Games</option>
+        <option value="last15">Last 15 Games</option>
+        <option value="last30">Last 30 Games</option>
+        <option value="career">Career</option>
+      </select>
+    </div>
+    <div class="filter-sep"></div>
+    <button class="load-btn" id="load-btn" onclick="loadStats()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+        <path d="M21 3v5h-5"/>
+        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+        <path d="M8 16H3v5"/>
+      </svg>
+      Load Stats
+    </button>
+  </div>
+
+  <div class="status-row">
+    <span class="status-text" id="status-text"></span>
+    <span class="row-count" id="row-count"></span>
+  </div>
+
+  <div class="table-wrap">
+    <div class="table-scroll">
+      <table id="stats-table">
+        <thead><tr id="thead-row"></tr></thead>
+        <tbody id="tbody">
+          <tr>
+            <td colspan="14" style="padding:60px 20px;text-align:center;color:#9ca3af;font-size:14px;">
+              Select filters above and click <strong>Load Stats</strong> to get started.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-footer" id="table-footer" style="display:none;">
+      <button class="more-btn" id="more-btn" onclick="showMore()">Show More</button>
+    </div>
+  </div>
+</div>
+
+<div class="player-tooltip" id="player-tooltip"></div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────
+const NHL_STATS   = 'https://api.nhle.com/stats/rest/en';
+const NHL_WEB     = 'https://api-web.nhle.com/v1';
+const LOGO_BASE   = 'https://assets.nhle.com/logos/nhl/svg';
+const HEADSHOT    = id => `https://assets.nhle.com/mugs/nhl/60x60/${id}.png`;
+const HEADSHOT_FB = id => `https://cms.nhl.bamgrid.com/images/headshots/current/60x60/${id}.jpg`;
+const PAGE_SIZE   = 50;
+
+const SPIN_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>`;
+
+// ── Cached DOM references ────────────────────────────────────────
+const DOM = {};
+function initDOM() {
+  DOM.tbody     = document.getElementById('tbody');
+  DOM.footer    = document.getElementById('table-footer');
+  DOM.moreBtn   = document.getElementById('more-btn');
+  DOM.rowCount  = document.getElementById('row-count');
+  DOM.status    = document.getElementById('status-text');
+  DOM.pageSub   = document.getElementById('page-sub');
+  DOM.loadBtn   = document.getElementById('load-btn');
+  DOM.theadRow  = document.getElementById('thead-row');
+  DOM.tooltip   = document.getElementById('player-tooltip');
+  DOM.seasonSel = document.getElementById('season-select');
+  DOM.teamTrigger = document.getElementById('team-trigger');
+  DOM.teamLabel   = document.getElementById('team-trigger-label');
+  DOM.teamPanel   = document.getElementById('team-panel');
+  DOM.teamList    = document.getElementById('team-list');
+  DOM.teamSearch  = document.getElementById('team-search');
+  DOM.poolSel   = document.getElementById('pool-select');
+  DOM.statType  = document.getElementById('stat-type-select');
+}
+
+// ── CORS proxy fallback ─────────────────────────────────────────
+// Tries a chain of CORS proxies. Only accepts responses shaped like
+// { data: [...] } — the NHL stats REST envelope. Any other shape
+// (proxy error, NHL API error JSON) is rejected and the next proxy is tried.
+let workingProxy = null;
+
+function isValidNHLResponse(d) {
+  return d != null && Array.isArray(d.data);
+}
+
+async function fetchWithFallback(url) {
+  const tag = url.slice(url.lastIndexOf('/') + 1).slice(0, 40);
+
+  const attempts = [
+    // 0 ─ Local Python proxy (python3 nhl-proxy.py) — most reliable option
+    async () => {
+      const localUrl = url.replace('https://api.nhle.com', 'http://localhost:8082');
+      const r = await fetch(localUrl);
+      if (!r.ok) throw new Error('local proxy HTTP ' + r.status);
+      const d = await r.json();
+      if (!isValidNHLResponse(d)) throw new Error('local proxy: no .data — ' + JSON.stringify(d).slice(0,80));
+      return d;
+    },
+    // 1 ─ Direct (works when api.nhle.com sends CORS headers)
+    async () => {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('Direct HTTP ' + r.status);
+      const d = await r.json();
+      if (!isValidNHLResponse(d)) throw new Error('Direct: no .data — ' + JSON.stringify(d).slice(0,80));
+      return d;
+    },
+    // 1 ─ allorigins /raw — returns raw body directly, avoids JSON wrapper
+    async () => {
+      const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+      if (!r.ok) throw new Error('allorigins/raw HTTP ' + r.status);
+      const d = await r.json();
+      if (!isValidNHLResponse(d)) throw new Error('allorigins/raw: no .data — ' + JSON.stringify(d).slice(0,80));
+      return d;
+    },
+    // 2 ─ allorigins /get — JSON wrapper with status.http_code
+    async () => {
+      const r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(url));
+      if (!r.ok) throw new Error('allorigins/get HTTP ' + r.status);
+      const j = await r.json();
+      const code = j.status && j.status.http_code;
+      console.log('[' + tag + '] allorigins http_code=' + code, (j.contents||'').slice(0,60));
+      if (code >= 400) throw new Error('allorigins: NHL API returned ' + code + ' — ' + (j.contents||'').slice(0,80));
+      if (!j.contents) throw new Error('allorigins: empty contents');
+      const d = JSON.parse(j.contents);
+      if (!isValidNHLResponse(d)) throw new Error('allorigins: no .data — ' + JSON.stringify(d).slice(0,80));
+      return d;
+    },
+    // 3 ─ cors.lol — simple raw proxy, different IP range from allorigins
+    async () => {
+      const r = await fetch('https://api.cors.lol/?url=' + encodeURIComponent(url));
+      if (!r.ok) throw new Error('cors.lol HTTP ' + r.status);
+      const d = await r.json();
+      if (!isValidNHLResponse(d)) throw new Error('cors.lol: no .data — ' + JSON.stringify(d).slice(0,80));
+      return d;
+    },
+    // 4 ─ corsproxy.io
+    async () => {
+      const r = await fetch('https://corsproxy.io/?' + encodeURIComponent(url));
+      if (!r.ok) throw new Error('corsproxy HTTP ' + r.status);
+      const d = await r.json();
+      if (!isValidNHLResponse(d)) throw new Error('corsproxy: no .data — ' + JSON.stringify(d).slice(0,80));
+      return d;
+    },
+    // 5 ─ codetabs
+    async () => {
+      const r = await fetch('https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url));
+      if (!r.ok) throw new Error('codetabs HTTP ' + r.status);
+      const d = await r.json();
+      if (!isValidNHLResponse(d)) throw new Error('codetabs: no .data — ' + JSON.stringify(d).slice(0,80));
+      return d;
+    },
+  ];
+
+  if (workingProxy !== null) {
+    try { return await attempts[workingProxy](); }
+    catch(e) { console.warn('Cached proxy ' + workingProxy + ' failed:', e.message); workingProxy = null; }
+  }
+  for (let i = 0; i < attempts.length; i++) {
+    try { const d = await attempts[i](); workingProxy = i; return d; }
+    catch(e) { console.warn('Proxy ' + i + ' failed for ' + tag + ':', e.message); }
+  }
+  throw new Error('All proxies failed. Run: python3 nhl-proxy.py  (see F12 console for details)');
+}
+
+// ── Jersey numbers — batch via NHL bios endpoint ────────────────
+// Fetches bios for the selected season to retrieve sweater numbers.
+const numCache = {};
+
+async function loadJerseyNumbers() {
+  const season   = DOM.seasonSel.value;
+  const seasonId = `${parseInt(season) - 1}${season}`;
+
+  const unresolved = [...new Set(
+    allRows.filter(r => r.jerseyNum === undefined && r.playerId).map(r => r.playerId)
+  )];
+  if (!unresolved.length) return;
+
+  try {
+    // Fetch bios in pages of 500 and cache sweater numbers
+    let start = 0;
+    const limit = 500;
+    while (true) {
+      const url = `${NHL_STATS}/skater/bios?limit=${limit}&start=${start}&sort=playerId` +
+                  `&cayenneExp=seasonId=${seasonId}%20gameTypeId=2`;
+      const d = await fetchWithFallback(url);
+      const batch = d.data || [];
+      batch.forEach(p => { numCache[p.playerId] = p.sweaterNumber ?? '—'; });
+      if (batch.length < limit) break;
+      start += limit;
+    }
+  } catch(e) {
+    console.warn('Jersey batch failed:', e.message);
+  }
+  // Apply cached values (including any fetched in prior calls)
+  allRows.forEach(r => {
+    if (r.jerseyNum === undefined && r.playerId) {
+      r.jerseyNum = numCache[r.playerId] ?? '—';
+    }
+  });
+}
+
+// ── Player tooltip ───────────────────────────────────────────────
+const playerBioCache = {};
+
+async function fetchPlayerBio(playerId) {
+  if (playerBioCache[playerId] !== undefined) return playerBioCache[playerId];
+  try {
+    const season   = DOM.seasonSel.value;
+    const seasonId = parseInt(`${parseInt(season) - 1}${season}`);
+    const [landingD, logD] = await Promise.all([
+      fetchWithFallback(`${NHL_WEB}/player/${playerId}/landing`),
+      fetchWithFallback(`${NHL_WEB}/player/${playerId}/game-log/${seasonId}/2`)
+    ]);
+
+    const career      = landingD.careerTotals?.regularSeason || {};
+    const seasonStats = (landingD.seasonTotals || [])
+      .find(s => s.season === seasonId && s.gameTypeId === 2) || {};
+
+    // game-log entries: most-recent last; reverse so index 0 = most recent
+    const gameSplits = [...(logD.gameLog || [])].reverse();
+    const lastPts    = gameSplits.slice(0, 3).map(g => (g.goals ?? 0) + (g.assists ?? 0));
+
+    playerBioCache[playerId] = {
+      dob:    landingD.birthDate || null,
+      sG:     seasonStats.gamesPlayed || 0,
+      cG:     career.gamesPlayed      || 0,
+      sGoals: seasonStats.goals       || 0,
+      cGoals: career.goals            || 0,
+      lastPts,
+      pts7:  calcRollingPts(gameSplits, 7),
+      pts15: calcRollingPts(gameSplits, 15),
+      pts30: calcRollingPts(gameSplits, 30),
+    };
+    return playerBioCache[playerId];
+  } catch(e) {
+    playerBioCache[playerId] = null;
+    return null;
+  }
+}
+
+function formatDOB(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${m}/${d}/${y}`;
+}
+
+function showTooltip(el, playerId) {
+  const bio     = playerBioCache[playerId];
+  const dobStr  = bio?.dob ? formatDOB(bio.dob) : '—';
+  const sG      = bio?.sG      ?? '—';
+  const cG      = bio?.cG      ?? '—';
+  const sGoals  = bio?.sGoals  ?? '—';
+  const cGoals  = bio?.cGoals  ?? '—';
+  const pts     = bio?.lastPts || [];
+  const ptsHtml = pts.length
+    ? `<span class="tooltip-hits">${pts.map(p => `<span class="tooltip-hit">${p}</span>`).join('')}</span>`
+    : '';
+
+  DOM.tooltip.innerHTML =
+    `<span class="tooltip-dob">${dobStr}</span>` +
+    `<span class="tooltip-frac"><span class="tn">${sG}</span><span class="td">${cG}</span></span>` +
+    ptsHtml +
+    `<span class="tooltip-frac"><span class="tn">${sGoals}</span><span class="td">${cGoals}</span></span>`;
+
+  const rect = el.getBoundingClientRect();
+  DOM.tooltip.style.left = rect.left + 'px';
+  DOM.tooltip.style.top  = '-9999px';
+  DOM.tooltip.classList.add('visible');
+  const tipH = DOM.tooltip.getBoundingClientRect().height;
+  DOM.tooltip.style.top = (rect.top - tipH - 4) + 'px';
+}
+
+function hideTooltip() {
+  DOM.tooltip.classList.remove('visible');
+}
+
+// ── Points-per-game rolling tooltip ─────────────────────────────
+function calcRollingPts(splits, n) {
+  const window = splits.slice(0, n);
+  if (!window.length) return '—';
+  const pts = window.reduce((s, g) => s + ((g.goals || 0) + (g.assists || 0)), 0);
+  return (pts / window.length).toFixed(2);
+}
+
+function positionTooltip(el) {
+  const rect = el.getBoundingClientRect();
+  DOM.tooltip.style.left = rect.left + 'px';
+  DOM.tooltip.style.top  = '-9999px';
+  DOM.tooltip.classList.add('visible');
+  const tipH = DOM.tooltip.getBoundingClientRect().height;
+  DOM.tooltip.style.top = (rect.top - tipH - 4) + 'px';
+}
+
+function showPtsTooltip(el, playerId) {
+  const bio = playerBioCache[playerId];
+  if (!bio) return;
+  DOM.tooltip.innerHTML =
+    `<span>${bio.pts7}</span>` +
+    `<span style="opacity:0.4;font-size:10px;">/</span>` +
+    `<span>${bio.pts15}</span>` +
+    `<span style="opacity:0.4;font-size:10px;">/</span>` +
+    `<span>${bio.pts30}</span>`;
+  positionTooltip(el);
+}
+
+// ── Column definitions ──────────────────────────────────────────
+const COLS = [
+  { key: 'rank',             label: 'RK',     title: 'Rank',                   sortable: false, cls: 'col-rank' },
+  { key: 'player',           label: 'PLAYER', title: 'Player',                 sortable: false, align: 'left'  },
+  { key: 'jerseyNum',        label: '#',      title: 'Jersey Number',          sortable: false, cls: 'col-num' },
+  { key: 'team',             label: 'TEAM',   title: 'Team',                   sortable: false },
+  { key: 'gamesPlayed',      label: 'GP',     title: 'Games Played',           sortable: true  },
+  { key: 'goals',            label: 'G',      title: 'Goals',                  sortable: true  },
+  { key: 'assists',          label: 'A',      title: 'Assists',                sortable: true  },
+  { key: 'points',           label: 'PTS',    title: 'Points',                 sortable: true, defaultSort: true },
+  { key: 'plusMinus',        label: '+/-',    title: 'Plus/Minus',             sortable: true  },
+  { key: 'penaltyMinutes',   label: 'PIM',    title: 'Penalty Minutes',        sortable: true  },
+  { key: 'powerPlayGoals',   label: 'PPG',    title: 'Power Play Goals',       sortable: true  },
+  { key: 'shorthandedGoals', label: 'SHG',    title: 'Shorthanded Goals',      sortable: true  },
+  { key: 'shots',            label: 'SOG',    title: 'Shots on Goal',          sortable: true  },
+  { key: 'shootingPct',      label: 'S%',     title: 'Shooting Percentage',    sortable: true, isRate: true },
+];
+
+// ── State ────────────────────────────────────────────────────────
+let allRows     = [];
+let sortedCache = [];   // cached sorted result; invalidated when sort changes
+let sortKey     = 'points';
+let sortAsc     = false;
+let displayedN  = PAGE_SIZE;
+
+// ── Season selector ──────────────────────────────────────────────
+function buildSeasonSelect() {
+  const sel = DOM.seasonSel;
+  const currentYear = new Date().getFullYear();
+  const frag = document.createDocumentFragment();
+  for (let y = currentYear + 1; y >= 1918; y--) {  // NHL first season was 1917-18
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y;
+    frag.appendChild(opt);
+  }
+  sel.appendChild(frag);
+}
+
+// ── Team multi-select ────────────────────────────────────────────
+let allTeams     = [];   // [{ id, name }]
+let selectedTeams = new Set();
+
+function updateTeamTriggerLabel() {
+  const n = selectedTeams.size;
+  DOM.teamLabel.textContent = n === 0 ? 'All Teams'
+    : n === 1 ? allTeams.find(t => selectedTeams.has(t.id))?.name || '1 Team'
+    : `${n} Teams`;
+}
+
+function buildTeamListItems(teams) {
+  DOM.teamList.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  teams.forEach(t => {
+    const item = document.createElement('div');
+    item.className = 'ms-item';
+    item.dataset.id = t.id;
+    item.innerHTML = `<input type="checkbox" id="tc-${t.id}" ${selectedTeams.has(t.id) ? 'checked' : ''}>
+      <label for="tc-${t.id}">${t.name}</label>`;
+    item.querySelector('input').addEventListener('change', e => {
+      e.target.checked ? selectedTeams.add(t.id) : selectedTeams.delete(t.id);
+      updateTeamTriggerLabel();
+    });
+    frag.appendChild(item);
+  });
+  DOM.teamList.appendChild(frag);
+}
+
+function filterTeamList(query) {
+  const q = query.toLowerCase();
+  const filtered = q ? allTeams.filter(t => t.name.toLowerCase().includes(q)) : allTeams;
+  buildTeamListItems(filtered);
+}
+
+function selectAllTeams() {
+  allTeams.forEach(t => selectedTeams.add(t.id));
+  filterTeamList(DOM.teamSearch.value);
+  updateTeamTriggerLabel();
+}
+
+function clearTeams() {
+  selectedTeams.clear();
+  filterTeamList(DOM.teamSearch.value);
+  updateTeamTriggerLabel();
+}
+
+function toggleTeamDropdown() {
+  const open = DOM.teamPanel.classList.toggle('open');
+  DOM.teamTrigger.classList.toggle('open', open);
+  if (open) { DOM.teamSearch.value = ''; filterTeamList(''); DOM.teamSearch.focus(); }
+}
+
+// Close when clicking outside
+document.addEventListener('click', e => {
+  if (!document.getElementById('team-ms').contains(e.target)) {
+    DOM.teamPanel.classList.remove('open');
+    DOM.teamTrigger.classList.remove('open');
+  }
+});
+
+function loadTeams() {
+  // Hardcoded to avoid CORS issues — 32 active NHL franchises with their stats-API IDs
+  allTeams = [
+    { id: 24, name: 'Anaheim Ducks',          abbr: 'ANA' },
+    { id:  6, name: 'Boston Bruins',           abbr: 'BOS' },
+    { id:  7, name: 'Buffalo Sabres',          abbr: 'BUF' },
+    { id: 20, name: 'Calgary Flames',          abbr: 'CGY' },
+    { id: 12, name: 'Carolina Hurricanes',     abbr: 'CAR' },
+    { id: 16, name: 'Chicago Blackhawks',      abbr: 'CHI' },
+    { id: 21, name: 'Colorado Avalanche',      abbr: 'COL' },
+    { id: 29, name: 'Columbus Blue Jackets',   abbr: 'CBJ' },
+    { id: 25, name: 'Dallas Stars',            abbr: 'DAL' },
+    { id: 17, name: 'Detroit Red Wings',       abbr: 'DET' },
+    { id: 22, name: 'Edmonton Oilers',         abbr: 'EDM' },
+    { id: 13, name: 'Florida Panthers',        abbr: 'FLA' },
+    { id: 26, name: 'Los Angeles Kings',       abbr: 'LAK' },
+    { id: 30, name: 'Minnesota Wild',          abbr: 'MIN' },
+    { id:  8, name: 'Montréal Canadiens',      abbr: 'MTL' },
+    { id: 18, name: 'Nashville Predators',     abbr: 'NSH' },
+    { id:  1, name: 'New Jersey Devils',       abbr: 'NJD' },
+    { id:  2, name: 'New York Islanders',      abbr: 'NYI' },
+    { id:  3, name: 'New York Rangers',        abbr: 'NYR' },
+    { id:  9, name: 'Ottawa Senators',         abbr: 'OTT' },
+    { id:  4, name: 'Philadelphia Flyers',     abbr: 'PHI' },
+    { id:  5, name: 'Pittsburgh Penguins',     abbr: 'PIT' },
+    { id: 28, name: 'San Jose Sharks',         abbr: 'SJS' },
+    { id: 55, name: 'Seattle Kraken',          abbr: 'SEA' },
+    { id: 19, name: 'St. Louis Blues',         abbr: 'STL' },
+    { id: 14, name: 'Tampa Bay Lightning',     abbr: 'TBL' },
+    { id: 10, name: 'Toronto Maple Leafs',     abbr: 'TOR' },
+    { id: 53, name: 'Utah Hockey Club',        abbr: 'UTA' },
+    { id: 23, name: 'Vancouver Canucks',       abbr: 'VAN' },
+    { id: 54, name: 'Vegas Golden Knights',    abbr: 'VGK' },
+    { id: 15, name: 'Washington Capitals',     abbr: 'WSH' },
+    { id: 52, name: 'Winnipeg Jets',           abbr: 'WPG' },
+  ];
+  buildTeamListItems(allTeams);
+}
+
+// ── Build table header — only called when sort changes ──────────
+function buildHeader() {
+  DOM.theadRow.innerHTML = COLS.map(c => {
+    const isSorted   = c.key === sortKey;
+    const arrow      = isSorted ? (sortAsc ? '▲' : '▼') : '▲';
+    const sortedCls  = isSorted ? ' sorted' : '';
+    const clickAttr  = c.sortable ? `onclick="sortBy('${c.key}')"` : '';
+    const cursorStyle = c.sortable ? '' : 'cursor:default;';
+    return `<th class="col-${c.key}${sortedCls}" title="${c.title}" ${clickAttr} style="${cursorStyle}">
+      ${c.label}${c.sortable ? `<span class="sort-icon">${arrow}</span>` : ''}
+    </th>`;
+  }).join('');
+}
+
+// ── Sort ─────────────────────────────────────────────────────────
+function sortBy(key) {
+  if (sortKey === key) {
+    sortAsc = !sortAsc;
+  } else {
+    sortKey = key;
+    sortAsc = false;
+  }
+  sortedCache = [];   // invalidate cache
+  displayedN  = PAGE_SIZE;
+  buildHeader();
+  renderTable();
+}
+
+function getSortVal(row, key) {
+  const v = row[key];
+  if (v === undefined || v === null || v === '—' || v === '') return -Infinity;
+  const n = parseFloat(v);
+  return isNaN(n) ? v : n;
+}
+
+function getSorted() {
+  if (sortedCache.length) return sortedCache;
+  sortedCache = [...allRows].sort((a, b) => {
+    const av = getSortVal(a, sortKey);
+    const bv = getSortVal(b, sortKey);
+    if (av < bv) return sortAsc ? -1 : 1;
+    if (av > bv) return sortAsc ? 1 : -1;
+    return 0;
+  });
+  return sortedCache;
+}
+
+// ── Render ───────────────────────────────────────────────────────
+function renderTable() {
+  const sorted       = getSorted();
+  const slice        = sorted.slice(0, displayedN);
+  const sortedColIdx = COLS.findIndex(c => c.key === sortKey);
+
+  DOM.tbody.innerHTML = slice.map((row, i) => {
+    const rank = i + 1;
+    return `<tr>
+      ${COLS.map((c, ci) => {
+        const sc = ci === sortedColIdx ? ' col-sorted' : '';
+        switch (c.key) {
+          case 'rank':
+            return `<td class="col-rank${sc}">${rank}</td>`;
+          case 'player':
+            return `<td${sc ? ` class="${sc.trim()}"` : ''}>
+              <div class="player-cell">
+                <img class="player-photo" src="${HEADSHOT(row.playerId)}"
+                  onerror="this.src='${HEADSHOT_FB(row.playerId)}'" alt="${row.playerName}">
+                <div class="player-info">
+                  <a class="player-name" href="https://www.nhl.com/player/${row.playerId}" target="_blank"
+                    onmouseenter="fetchPlayerBio(${row.playerId}).then(()=>showTooltip(this,${row.playerId}))"
+                    onmouseleave="hideTooltip()">${row.playerName}</a>
+                  ${row.position ? `<span class="player-pos-badge">${row.position}</span>` : ''}
+                </div>
+              </div>
+            </td>`;
+          case 'jerseyNum':
+            return `<td class="col-num${sc}">${row.jerseyNum !== undefined ? '#' + row.jerseyNum : '<span class="skeleton" style="width:24px;height:14px;"></span>'}</td>`;
+          case 'team':
+            return `<td${sc ? ` class="${sc.trim()}"` : ''}>
+              <div class="team-cell">
+                <img class="team-logo" src="${LOGO_BASE}/${row.teamAbbr}_light.svg"
+                  alt="${row.teamAbbr}" onerror="this.style.display='none'">
+                <span class="team-abbr">${row.teamAbbr || '—'}</span>
+              </div>
+            </td>`;
+          case 'points': {
+            const val     = row[c.key];
+            const display = (val === null || val === undefined || val === '') ? '—' : val;
+            const isHL    = c.key === sortKey;
+            return `<td class="${isHL ? 'stat-highlight' : 'stat-val'}${sc} pct-val">
+              <a href="javascript:void(0)"
+                style="color:inherit;text-decoration:none;cursor:default;"
+                onmouseenter="fetchPlayerBio(${row.playerId}).then(()=>showPtsTooltip(this,${row.playerId}))"
+                onmouseleave="hideTooltip()">${display}</a></td>`;
+          }
+          default: {
+            const val     = row[c.key];
+            const display = (val === null || val === undefined || val === '') ? '—' : val;
+            const isHL    = c.key === sortKey;
+            return `<td class="${isHL ? 'stat-highlight' : 'stat-val'}${sc}${c.isRate ? ' pct-val' : ''}">${display}</td>`;
+          }
+        }
+      }).join('')}
+    </tr>`;
+  }).join('');
+
+  DOM.rowCount.textContent = `Showing ${slice.length} of ${sorted.length} players`;
+
+  if (sorted.length > displayedN) {
+    DOM.footer.style.display = '';
+    DOM.moreBtn.disabled = false;
+    DOM.moreBtn.textContent = `Show More (${Math.min(PAGE_SIZE, sorted.length - displayedN)} more)`;
+  } else {
+    DOM.footer.style.display = sorted.length > 0 ? '' : 'none';
+    DOM.moreBtn.disabled = true;
+    DOM.moreBtn.textContent = 'All players shown';
+  }
+
+  const col       = COLS.find(c => c.key === sortKey);
+  const season    = DOM.seasonSel.value;
+  const statType  = DOM.statType.value;
+  const teamLabel = selectedTeams.size === 0 ? 'All Teams'
+    : selectedTeams.size === 1 ? allTeams.find(t => selectedTeams.has(t.id))?.name || '1 Team'
+    : `${selectedTeams.size} Teams`;
+  const statLabel = ROLLING_LABEL[statType] ?? (statType.charAt(0).toUpperCase() + statType.slice(1));
+  DOM.pageSub.textContent =
+    `Sorted by ${col?.title || sortKey} — ${statLabel} — ${season} — ${teamLabel}`;
+}
+
+function showMore() {
+  displayedN += PAGE_SIZE;
+  renderTable();
+  loadJerseyNumbers().then(() => renderTable());
+}
+
+// ── Skeleton rows while loading ──────────────────────────────────
+function renderSkeleton() {
+  const blankCols = Array(COLS.length - 2).fill('<td><span class="skeleton" style="width:32px;height:12px;"></span></td>').join('');
+  DOM.tbody.innerHTML = Array.from({ length: 20 }, (_, i) => `
+    <tr>
+      <td class="col-rank" style="color:#d1d5db">${i + 1}</td>
+      <td>
+        <div class="player-cell">
+          <span class="skeleton" style="width:36px;height:36px;border-radius:50%;"></span>
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <span class="skeleton" style="width:${110 + (i * 7) % 50}px;height:13px;"></span>
+            <span class="skeleton" style="width:30px;height:10px;"></span>
+          </div>
+        </div>
+      </td>
+      ${blankCols}
+    </tr>`).join('');
+}
+
+// ── Schedule cache for rolling game-day windows ─────────────────
+// Walks backwards through the NHL schedule API to collect the unique
+// game dates from the last ~65 days, then returns the calendar date
+// that was exactly N game-days ago. One fetch per season, cached.
+const scheduleCache = {};
+
+async function getStartDate(gameDaysBack, season) {
+  if (!scheduleCache[season]) {
+    const today    = new Date();
+    const lookback = new Date(today);
+    lookback.setDate(today.getDate() - 65); // 65 days covers 30+ game days
+    const fmt      = d => d.toISOString().split('T')[0];
+
+    let allDates  = [];
+    let fetchDate = fmt(today);
+
+    // Walk week-by-week back through the NHL schedule endpoint
+    for (let i = 0; i < 12; i++) {
+      const data = await fetchWithFallback(`${NHL_WEB}/schedule/${fetchDate}`);
+      const weekDates = (data.gameWeek || [])
+        .filter(d => d.numberOfGames > 0 && d.date >= fmt(lookback))
+        .map(d => d.date);
+      allDates = allDates.concat(weekDates);
+      const prev = data.previousStartDate;
+      if (!prev || prev < fmt(lookback)) break;
+      fetchDate = prev;
+    }
+
+    // Unique game dates, most-recent first
+    scheduleCache[season] = [...new Set(allDates)].sort((a, b) => b.localeCompare(a));
+  }
+  // Index 0 = most recent game day; gameDaysBack-1 = Nth game day ago
+  return scheduleCache[season][gameDaysBack - 1] ?? null;
+}
+
+const ROLLING_LABEL = { last7: 'Last 7 Games', last15: 'Last 15 Games', last30: 'Last 30 Games' };
+
+// ── Load stats from NHL API ──────────────────────────────────────
+async function loadStats() {
+  const season   = DOM.seasonSel.value;
+  const seasonId = `${parseInt(season) - 1}${season}`;  // e.g. "2025" → "20242025"
+  const teamIds  = [...selectedTeams];
+  const pool     = DOM.poolSel.value;
+  const statType = DOM.statType.value;
+
+  DOM.loadBtn.classList.add('loading');
+  DOM.loadBtn.innerHTML = `${SPIN_SVG} Loading…`;
+  DOM.status.className = 'status-text';
+  DOM.status.textContent = 'Fetching stats…';
+  DOM.rowCount.textContent = '';
+  DOM.footer.style.display = 'none';
+
+  allRows     = [];
+  sortedCache = [];
+  displayedN  = PAGE_SIZE;
+  sortKey     = 'points';
+  sortAsc     = false;
+
+  buildHeader();
+  renderSkeleton();
+
+  try {
+    // ── Date range for rolling windows ────────────────────────
+    const rollingDays = { last7: 7, last15: 15, last30: 30 };
+    const nDays       = rollingDays[statType];
+    const isCareer    = statType === 'career';
+    let   startDate   = null;
+
+    if (nDays) {
+      startDate = await getStartDate(nDays, season);
+    }
+
+    // ── Build NHL Stats REST URL ───────────────────────────────
+    // Key finding from testing:
+    //   • Multi-condition cayenneExp (space OR 'AND' between conditions) → 400
+    //   • Single condition  cayenneExp=seasonId=20252026            → 200 ✓
+    //   • gameTypeId filter cannot be added server-side; position/team filtered client-side
+    //
+    // For rolling windows we add a gameDate filter as the ONLY cayenneExp condition
+    // (separate from seasonId, using the season as a URL param instead when possible).
+    // If the date cayenneExp also fails, season totals are returned as fallback.
+
+    // NHL API caps at 100 rows per page and sorts ascending by points by default —
+    // direction=desc/DESC is silently ignored. Strategy:
+    //   1. Fetch page 0 to learn the total player count.
+    //   2. If total ≤ 400, fetch all pages from the start.
+    //   3. If total > 400, fetch the last 400 rows (highest points) by offsetting
+    //      into the tail of the ascending list.
+    // The client-side sort then puts the highest-point players at the top.
+    const TARGET = 400;
+
+    const buildPageUrl = (pageStart) => {
+      let cayenne;
+      if (isCareer)       cayenne = null;
+      else if (startDate) cayenne = "gameDate >= '" + startDate + "'";
+      else                cayenne = 'seasonId=' + seasonId;
+      let q = 'limit=100&start=' + pageStart + '&sort=points&direction=desc';
+      if (isCareer) q += '&aggregate=true';
+      if (cayenne)  q += '&cayenneExp=' + encodeURIComponent(cayenne);
+      return NHL_STATS + '/skater/summary?' + q;
+    };
+
+    let splits = [];
+    DOM.status.textContent = 'Fetching players…';
+    try {
+      // First request reveals the full population size via response.total
+      const firstResp = await fetchWithFallback(buildPageUrl(0));
+      const total     = (firstResp && firstResp.total) || 0;
+      const firstPage = (firstResp && firstResp.data)  || [];
+      console.log('[NHL] Total players available:', total);
+
+      if (total <= TARGET) {
+        // Fewer than TARGET total — fetch every page from the start
+        splits = firstPage;
+        let s = 100;
+        while (s < total) {
+          const r    = await fetchWithFallback(buildPageUrl(s));
+          const page = (r && r.data) || [];
+          splits = splits.concat(page);
+          DOM.status.textContent = 'Loading… ' + splits.length + ' / ' + total + ' players';
+          if (page.length < 100) break;
+          s += 100;
+        }
+      } else {
+        // More than TARGET total — fetch only the last TARGET rows.
+        // Because the API sorts ascending, the tail = highest-scoring players.
+        const startAt = total - TARGET;
+        for (let s = startAt; s < total; s += 100) {
+          const r    = await fetchWithFallback(buildPageUrl(s));
+          const page = (r && r.data) || [];
+          splits = splits.concat(page);
+          DOM.status.textContent = 'Loading… ' + splits.length + ' players';
+          if (page.length < 100) break;
+        }
+      }
+      console.log('[NHL] Loaded', splits.length, 'players (total available:', total + ')');
+    } catch(restErr) {
+      console.warn('[NHL] REST failed:', restErr.message);
+    }
+    // ── Web-API fallback (api-web.nhle.com via allorigins) ─────
+    // Valid category names confirmed by HTTP 200: goals, assists, points, plusMinus
+    // Routed through allorigins so the browser CORS restriction is bypassed.
+    if (!splits.length && !isCareer && !startDate) {
+      DOM.status.textContent = 'Trying NHL.com API fallback…';
+      console.log('[NHL] Trying web API fallback…');
+
+      const fetchWebCat = async (cat) => {
+        const target = NHL_WEB + '/skater-stats-leaders/' + seasonId + '/2?categories=' + cat + '&limit=999';
+        // Try allorigins/raw first, then /get, then direct
+        for (const proxyUrl of [
+          'https://api.allorigins.win/raw?url=' + encodeURIComponent(target),
+          'https://api.cors.lol/?url='           + encodeURIComponent(target),
+          'https://api.allorigins.win/get?url='  + encodeURIComponent(target),
+        ]) {
+          try {
+            const r = await fetch(proxyUrl);
+            if (!r.ok) continue;
+            const raw = await r.json();
+            // allorigins /get wraps in {contents:...}
+            const d = raw.contents ? JSON.parse(raw.contents) : raw;
+            if (d && d[cat]) return d;
+          } catch(e) {}
+        }
+        // Last resort: direct (works if user's browser allows the CORS)
+        try {
+          const r = await fetch(target);
+          if (r.ok) return r.json();
+        } catch(e) {}
+        return {};
+      };
+
+      const VALID_CATS = ['goals', 'assists', 'points', 'plusMinus'];
+      const catResults  = await Promise.all(VALID_CATS.map(fetchWebCat));
+      const playerMap   = {};
+
+      VALID_CATS.forEach((cat, ci) => {
+        ((catResults[ci] && catResults[ci][cat]) || []).forEach(p => {
+          const id = p.id; if (!id) return;
+          if (!playerMap[id]) {
+            playerMap[id] = {
+              playerId:  id,
+              playerName: [p.firstName && p.firstName.default, p.lastName && p.lastName.default].filter(Boolean).join(' ') || '—',
+              position:   p.positionCode || '',
+              teamAbbr:   (p.teamAbbrev && p.teamAbbrev.default) || '—',
+              jerseyNum:  p.sweaterNumber != null ? p.sweaterNumber : undefined,
+              gamesPlayed: '—', goals: '—', assists: '—', points: '—',
+              plusMinus: '—', penaltyMinutes: '—', powerPlayGoals: '—',
+              shorthandedGoals: '—', shots: '—', shootingPct: '—',
+            };
+          }
+          if (p.value != null) playerMap[id][cat] = p.value;
+        });
+      });
+
+      let webRows = Object.values(playerMap);
+      // Position / team filters applied client-side
+      if (pool === 'F') webRows = webRows.filter(r => 'LCR'.includes(r.position));
+      else if (pool === 'D') webRows = webRows.filter(r => r.position === 'D');
+      if (teamIds.length) {
+        const abbrs = new Set(allTeams.filter(t => teamIds.includes(t.id)).map(t => t.abbr));
+        webRows = webRows.filter(r => abbrs.has(r.teamAbbr));
+      }
+      console.log('[NHL] Web API fallback:', webRows.length, 'rows');
+
+      if (webRows.length) {
+        allRows = webRows; sortedCache = [];
+        buildHeader(); renderTable();
+        DOM.status.textContent = 'Loaded ' + allRows.length + ' players (G / A / PTS / +− via NHL.com — other stats unavailable from this source).';
+        DOM.loadBtn.classList.remove('loading');
+        DOM.loadBtn.innerHTML = SPIN_SVG + ' Load Stats';
+        return;
+      }
+    }
+
+    // ── No data from any source ────────────────────────────────
+    if (!splits.length) {
+      DOM.tbody.innerHTML = '<tr><td colspan="' + COLS.length + '"><div class="empty-state">' +
+        '<h3>No data found</h3>' +
+        '<p style="margin-bottom:10px;">Public proxy services are being blocked or rate-limited by the NHL API. ' +
+        'Run the included local proxy in a second terminal, then click Load Stats again:</p>' +
+        '<pre style="background:#f3f4f6;padding:10px 14px;border-radius:6px;font-size:13px;text-align:left;display:inline-block;margin-bottom:10px;">python3 nhl-proxy.py</pre>' +
+        '<p style="font-size:12px;color:#6b7280;">(The proxy only needs Python — no extra packages. Keep it running while using this page.)</p>' +
+        '</div></td></tr>';
+      DOM.status.textContent = 'No data. Check F12 console.';
+      DOM.loadBtn.classList.remove('loading');
+      DOM.loadBtn.innerHTML = SPIN_SVG + ' Load Stats';
+      return;
+    }
+
+    // ── Apply position + team filters client-side ──────────────
+    // The NHL Cayenne parser only handles single-condition expressions, so we
+    // cannot filter server-side. Do it here instead.
+    if (pool === 'F') splits = splits.filter(s => 'LCR'.includes(s.positionCode));
+    else if (pool === 'D') splits = splits.filter(s => s.positionCode === 'D');
+    if (teamIds.length) {
+      const abbrs = new Set(allTeams.filter(t => teamIds.includes(t.id)).map(t => t.abbr));
+      splits = splits.filter(s => {
+        const a = (s.teamAbbrevs || '').split(',').map(x => x.trim());
+        return a.some(x => abbrs.has(x));
+      });
+    }
+
+        allRows = splits.map(s => {
+      const abbrs   = (s.teamAbbrevs || '').split(',');
+      const teamAbbr = abbrs[abbrs.length - 1].trim() || '—';
+      return {
+        playerId:         s.playerId,
+        playerName:       s.skaterFullName       || '—',
+        position:         s.positionCode         || '',
+        teamAbbr,
+        jerseyNum:        undefined,
+        gamesPlayed:      s.gamesPlayed          ?? '—',
+        goals:            s.goals                ?? '—',
+        assists:          s.assists              ?? '—',
+        points:           s.points               ?? '—',
+        plusMinus:        s.plusMinus            ?? '—',
+        penaltyMinutes:   s.penaltyMinutes       ?? '—',
+        powerPlayGoals:   s.powerPlayGoals       ?? '—',
+        shorthandedGoals: s.shorthandedGoals     ?? '—',
+        shots:            s.shots                ?? '—',
+        shootingPct:      s.shootingPctg != null
+                            ? parseFloat(s.shootingPctg).toFixed(1)
+                            : '—',
+      };
+    });
+
+    DOM.status.textContent = `Loaded ${allRows.length} players. Fetching jersey numbers…`;
+    renderTable();
+
+    await loadJerseyNumbers();
+    renderTable();
+
+    DOM.status.textContent = `Last updated: ${new Date().toLocaleTimeString()} — ${allRows.length} players`;
+
+  } catch(e) {
+    console.error(e);
+    DOM.tbody.innerHTML = `<tr><td colspan="${COLS.length}"><div class="empty-state">
+      <h3>Failed to load stats</h3>
+      <p style="margin-bottom:10px;">${e.message}</p>
+      <p style="font-size:12px;color:#6b7280;">
+        If opening directly as a file, run a local server instead:<br><br>
+        <code>python3 -m http.server 8080</code><br><br>
+        Then visit <strong>http://localhost:8080/nhl-stats.html</strong>
+      </p>
+    </div></td></tr>`;
+    DOM.status.className = 'status-text error';
+    DOM.status.textContent = `Error: ${e.message}`;
+  }
+
+  DOM.loadBtn.classList.remove('loading');
+  DOM.loadBtn.innerHTML = `${SPIN_SVG} Load Stats`;
+}
+
+// ── Init ─────────────────────────────────────────────────────────
+initDOM();
+buildSeasonSelect();
+buildHeader();
+loadTeams();
+</script>
+</body>
+</html>
