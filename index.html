@@ -226,27 +226,26 @@
 </div>
 
 <script>
-const NHL_WEB   = 'https://api-web.nhle.com/v1';
-const LOGO_BASE = 'https://assets.nhle.com/logos/nhl/svg';
-const HEADSHOT  = id => `https://assets.nhle.com/mugs/nhl/60x60/${id}.png`;
-const HS_FB     = id => `https://cms.nhl.bamgrid.com/images/headshots/current/60x60/${id}.jpg`;
+// ESPN NHL API — open CORS headers, no proxy needed
+const ESPN_NHL = 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl';
+const ESPN_HS  = id => `https://a.espncdn.com/i/headshots/nhl/players/full/${id}.png`;
 
 let currentDate      = new Date();
 let allGames         = [];
-let rosterCache      = {};
+let rosterCache      = {};        // keyed by ESPN team ID
 let playerStatsCache = {};
 let ptsRollingCache  = {};
-let workingProxy     = null;
 
-const formatDate = d =>
+const formatDate     = d =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const formatDateESPN = d =>
+  `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
 
-function currentSeasonId() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth() + 1;
-  const start = m >= 10 ? y : y - 1;
-  return `${start}${start + 1}`;
+// Direct fetch — ESPN allows it without a proxy
+async function apiFetch(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
 }
 
 function updateDateDisplay() {
@@ -265,61 +264,55 @@ function changeDate(delta) {
 
 updateDateDisplay();
 
-// ── CORS proxy chain ──────────────────────────────────────────────
-async function fetchWithFallback(url) {
-  const attempts = [
-    async () => { const r = await fetch(url); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); },
-    async () => {
-      const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
-      if (!r.ok) throw new Error('allorigins/raw ' + r.status);
-      return r.json();
-    },
-    async () => {
-      const r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(url));
-      if (!r.ok) throw new Error('allorigins/get ' + r.status);
-      const j = await r.json();
-      if (!j.contents) throw new Error('no contents');
-      return JSON.parse(j.contents);
-    },
-    async () => {
-      const r = await fetch('https://corsproxy.io/?' + encodeURIComponent(url));
-      if (!r.ok) throw new Error('corsproxy ' + r.status);
-      return r.json();
-    },
-    async () => {
-      const r = await fetch('https://api.cors.lol/?url=' + encodeURIComponent(url));
-      if (!r.ok) throw new Error('cors.lol ' + r.status);
-      return r.json();
-    },
-  ];
-  if (workingProxy !== null) {
-    try { return await attempts[workingProxy](); }
-    catch(e) { console.warn('Cached proxy failed:', e.message); workingProxy = null; }
-  }
-  for (let i = 0; i < attempts.length; i++) {
-    try { const d = await attempts[i](); workingProxy = i; return d; }
-    catch(e) { console.warn(`Proxy ${i} failed:`, e.message); }
-  }
-  throw new Error('All fetch methods failed. Try a local server: python3 -m http.server 8080');
+// ── Schedule parser ───────────────────────────────────────────────
+function parseEvent(ev) {
+  const comp   = ev.competitions?.[0] || {};
+  const home   = comp.competitors?.find(c => c.homeAway === 'home') || {};
+  const away   = comp.competitors?.find(c => c.homeAway === 'away') || {};
+  const status = comp.status || {};
+  const rec    = c => (c.records || []).find(r => r.type === 'total')?.summary || '';
+  return {
+    id:           ev.id,
+    homeTeam:     { id: home.team?.id || '', abbrev: home.team?.abbreviation || '', logo: home.team?.logo || '', score: home.score ?? '', record: rec(home) },
+    awayTeam:     { id: away.team?.id || '', abbrev: away.team?.abbreviation || '', logo: away.team?.logo || '', score: away.score ?? '', record: rec(away) },
+    venue:        comp.venue?.fullName || '',
+    startDate:    ev.date || '',
+    statusState:  status.type?.state || 'pre',   // 'pre' | 'in' | 'post'
+    statusDetail: status.type?.shortDetail || '',
+    seasonType:   ev.season?.type ?? 2,
+  };
 }
 
 // ── Roster fetch ─────────────────────────────────────────────────
-async function fetchRoster(abbr) {
-  const cached = rosterCache[abbr];
-  // Short-circuit only on a valid result; retry on failure
+async function fetchRoster(teamId) {
+  const cached = rosterCache[teamId];
   if (cached && !cached.failed) return cached;
   try {
-    const d = await fetchWithFallback(`${NHL_WEB}/roster/${abbr}/current`);
-    rosterCache[abbr] = {
-      forwards:   d.forwards   || [],
-      defensemen: d.defensemen || [],
-      goalies:    d.goalies    || [],
-    };
+    const d = await apiFetch(`${ESPN_NHL}/teams/${teamId}/roster`);
+    // ESPN groups athletes by position: [{ position: "Forwards", items: [...] }, ...]
+    const grp = kw =>
+      (d.athletes || []).find(g => {
+        const name = typeof g.position === 'string' ? g.position : (g.position?.name || '');
+        return name.toLowerCase().includes(kw);
+      })?.items || [];
+
+    const forwards   = grp('forward');
+    const defensemen = grp('defens');
+    const goalies    = grp('goal');
+
+    // Pre-seed DOB from roster so the tooltip has it before the stats call
+    [...forwards, ...defensemen, ...goalies].forEach(p => {
+      if (!playerStatsCache[p.id] || playerStatsCache[p.id].failed) {
+        playerStatsCache[p.id] = { dob: p.dateOfBirth?.substring(0, 10) || null };
+      }
+    });
+
+    rosterCache[teamId] = { forwards, defensemen, goalies };
   } catch(e) {
-    console.warn('fetchRoster failed for', abbr, e.message);
-    rosterCache[abbr] = { failed: true, forwards: [], defensemen: [], goalies: [] };
+    console.warn('fetchRoster failed for team', teamId, e.message);
+    rosterCache[teamId] = { failed: true, forwards: [], defensemen: [], goalies: [] };
   }
-  return rosterCache[abbr];
+  return rosterCache[teamId];
 }
 
 // ── Goalie stats line text (shared by initial render + background update) ──
@@ -329,113 +322,155 @@ function goalieStatsLine(stats) {
   return `${stats.sGP} GP this season`;
 }
 
-// ── Player stats (landing endpoint) ──────────────────────────────
+// ── Player stats ──────────────────────────────────────────────────
 async function fetchPlayerStats(playerId) {
   const cached = playerStatsCache[playerId];
-  // Short-circuit only on a valid (non-failed) result; retry on failure
-  if (cached !== undefined && !cached?.failed) return cached;
+  // Short-circuit only on a full valid result; retry stubs (just dob) and failures
+  if (cached && !cached.failed && cached.sGP !== undefined) return cached;
+  const existingDob = playerStatsCache[playerId]?.dob || null;
   try {
-    const d = await fetchWithFallback(`${NHL_WEB}/player/${playerId}/landing`);
-    const now = new Date();
-    const y = now.getFullYear(), m = now.getMonth() + 1;
-    const start = m >= 10 ? y : y - 1;
-    const seasonId = start * 10000 + (start + 1);  // e.g. 20262027
-    const career = d.careerTotals?.regularSeason || {};
-    const s = (d.seasonTotals || []).find(t => t.season === seasonId && t.gameTypeId === 2) || {};
+    const d = await apiFetch(`${ESPN_NHL}/athletes/${playerId}/stats`);
+
+    // ESPN returns splits as an array or object; find season vs career
+    const splitsArr = d.splits ? (Array.isArray(d.splits) ? d.splits : [d.splits]) : [];
+    const careerSplit = splitsArr.find(s => /career/i.test(s.name || s.abbreviation || ''));
+    const seasonSplit = splitsArr.find(s => !/career/i.test(s.name || s.abbreviation || '')) || splitsArr[0];
+    const sCats = seasonSplit?.categories || d.splits?.categories || [];
+    const cCats = careerSplit?.categories || [];
+
+    const getStat = (cats, ...names) => {
+      for (const cat of cats) {
+        for (const name of names) {
+          const s = (cat.stats || []).find(s =>
+            s.name?.toLowerCase() === name.toLowerCase() ||
+            s.abbreviation?.toLowerCase() === name.toLowerCase()
+          );
+          if (s?.value != null) return s.value;
+        }
+      }
+      return null;
+    };
+
+    const fmt2 = v => v != null ? parseFloat(v).toFixed(2) : null;
+    const fmt3 = v => v != null ? parseFloat(v).toFixed(3).replace('0.', '.') : null;
+
     const result = {
-      dob:  d.birthDate || null,
-      sGP:  s.gamesPlayed  ?? 0,   cGP:  career.gamesPlayed ?? 0,
-      sG:   s.goals        ?? 0,   cG:   career.goals       ?? 0,
-      sA:   s.assists      ?? 0,   cA:   career.assists     ?? 0,
-      sPTS: s.points       ?? 0,   cPTS: career.points      ?? 0,
-      // goalie-specific
-      sW:   s.wins   != null ? s.wins   : null,
-      sL:   s.losses != null ? s.losses : null,
-      sOTL: s.otLosses != null ? s.otLosses : null,
-      sGAA: s.goalsAgainstAverage != null ? parseFloat(s.goalsAgainstAverage).toFixed(2) : null,
-      sSVP: s.savePctg != null ? parseFloat(s.savePctg).toFixed(3).replace('0.', '.') : null,
+      dob:  existingDob,
+      sGP:  getStat(sCats, 'gamesPlayed', 'gp'),
+      cGP:  getStat(cCats, 'gamesPlayed', 'gp'),
+      sG:   getStat(sCats, 'goals', 'g'),
+      cG:   getStat(cCats, 'goals', 'g'),
+      sA:   getStat(sCats, 'assists', 'a'),
+      cA:   getStat(cCats, 'assists', 'a'),
+      sPTS: getStat(sCats, 'points', 'pts', 'p'),
+      cPTS: getStat(cCats, 'points', 'pts', 'p'),
+      sW:   getStat(sCats, 'wins', 'w'),
+      sL:   getStat(sCats, 'losses', 'l'),
+      sOTL: getStat(sCats, 'overtimeLosses', 'otlosses', 'otl'),
+      sGAA: fmt2(getStat(sCats, 'goalsAgainstAverage', 'gaa')),
+      sSVP: fmt3(getStat(sCats, 'savePercentage', 'savepctg', 'sv%', 'svp')),
     };
     playerStatsCache[playerId] = result;
     return result;
-  } catch {
-    playerStatsCache[playerId] = { failed: true };
+  } catch(e) {
+    console.warn('fetchPlayerStats failed for', playerId, e.message);
+    playerStatsCache[playerId] = { failed: true, dob: existingDob };
     return null;
   }
 }
 
-// ── Rolling pts/game + last 3 game pts (lazy, game-log endpoint) ─
+// ── Rolling pts/game ─────────────────────────────────────────────
 async function fetchPtsRolling(playerId) {
   const cached = ptsRollingCache[playerId];
-  // Short-circuit only on a valid result; retry on failure
-  if (cached !== undefined && !cached?.failed) return cached;
+  if (cached && !cached.failed) return cached;
   try {
-    const sid = currentSeasonId();
-    const d = await fetchWithFallback(`${NHL_WEB}/player/${playerId}/game-log/${sid}/2`);
-    const splits = [...(d.gameLog || [])].reverse(); // most-recent first
-    const calcAvg = n => {
-      const games = splits.slice(0, n);
-      if (!games.length) return '—';
-      const pts = games.reduce((s, g) => s + (g.goals || 0) + (g.assists || 0), 0);
-      return (pts / games.length).toFixed(2);
+    const d = await apiFetch(`${ESPN_NHL}/athletes/${playerId}/gamelog`);
+
+    // ESPN gamelog: either seasonTypes[].events[] or a flat events object/array
+    let events = [];
+    if (d.seasonTypes) {
+      const reg = d.seasonTypes.find(t => t.id === '2' || /regular/i.test(t.type || t.name || ''));
+      events = reg?.events || [];
+    } else if (Array.isArray(d.events)) {
+      events = d.events;
+    } else if (d.events) {
+      events = Object.values(d.events);
+    }
+
+    // Resolve stat indices for ESPN's parallel-array format
+    const labels = d.names || d.labels || [];
+    const idxOf  = (...ns) => {
+      for (const n of ns) {
+        const i = labels.findIndex(l => l.toLowerCase() === n.toLowerCase());
+        if (i >= 0) return i;
+      }
+      return -1;
     };
+    const gIdx = idxOf('goals', 'g');
+    const aIdx = idxOf('assists', 'a');
+
+    const getPts = e => {
+      const s = e.stats;
+      if (!s) return 0;
+      if (Array.isArray(s))
+        return (gIdx >= 0 ? +s[gIdx] || 0 : 0) + (aIdx >= 0 ? +s[aIdx] || 0 : 0);
+      return (+s.goals || +s.G || 0) + (+s.assists || +s.A || 0);
+    };
+
+    const sorted = [...events].sort((a, b) =>
+      new Date(b.gameDate || b.date || 0) - new Date(a.gameDate || a.date || 0)
+    );
+    const avg = n => {
+      const sl = sorted.slice(0, n);
+      return sl.length ? (sl.reduce((s, e) => s + getPts(e), 0) / sl.length).toFixed(2) : '—';
+    };
+
     ptsRollingCache[playerId] = {
-      lastPts: splits.slice(0, 3).map(g => (g.goals || 0) + (g.assists || 0)),
-      l7:  calcAvg(7),
-      l15: calcAvg(15),
-      l30: calcAvg(30),
+      lastPts: sorted.slice(0, 3).map(getPts),
+      l7: avg(7), l15: avg(15), l30: avg(30),
     };
     return ptsRollingCache[playerId];
-  } catch {
+  } catch(e) {
     ptsRollingCache[playerId] = { failed: true };
     return null;
   }
 }
 
-// ── Status + game helpers ─────────────────────────────────────────
-function gameStatusLabel(game) {
-  const gs = game.gameState;
-  if (gs === 'LIVE' || gs === 'CRIT') {
-    const per = game.periodDescriptor;
-    const label = per?.periodType === 'OT' ? 'OT'
-      : per?.periodType === 'SO' ? 'SO'
-      : `P${game.period || ''}`;
-    return { label, cls: 'live' };
-  }
-  if (gs === 'FINAL' || gs === 'OFF') return { label: 'Final', cls: 'final' };
-  return null;
-}
-
-function formatGameTime(game) {
+// ── Helpers ───────────────────────────────────────────────────────
+function formatGameTime(dateStr) {
   try {
-    const dt = new Date(game.startTimeUTC);
-    return dt.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', timeZone:'America/Los_Angeles' });
+    return new Date(dateStr).toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles',
+    });
   } catch { return ''; }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────
 function playerName(p) {
-  return `${p.firstName?.default || ''} ${p.lastName?.default || ''}`.trim();
+  return p.fullName || p.displayName || `${p.firstName || ''} ${p.lastName || ''}`.trim();
+}
+
+function playerLink(p) {
+  const l = (p.links || []).find(l => (l.rel || []).includes('playercard'));
+  return l?.href || `https://www.espn.com/nhl/player/_/id/${p.id}`;
 }
 
 
 const REFRESH_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>`;
 
-// ── Skeleton placeholder card (shown while a game's rosters load) ─
+// ── Skeleton placeholder card ─────────────────────────────────────
 function skeletonCard(game, i) {
-  const away = game.awayTeam.abbrev;
-  const home = game.homeTeam.abbrev;
   return `
     <div class="game-card" id="game-slot-${i}">
       <div class="game-header">
         <div class="matchup" style="opacity:0.75;">
           <span class="team-abbr">
-            <img class="team-logo" src="${LOGO_BASE}/${away}_light.svg" onerror="this.style.display='none'" alt="${away}">
-            ${away}
+            <img class="team-logo" src="${game.awayTeam.logo}" onerror="this.style.display='none'" alt="${game.awayTeam.abbrev}">
+            ${game.awayTeam.abbrev}
           </span>
           <span class="vs-sep">@</span>
           <span class="team-abbr">
-            <img class="team-logo" src="${LOGO_BASE}/${home}_light.svg" onerror="this.style.display='none'" alt="${home}">
-            ${home}
+            <img class="team-logo" src="${game.homeTeam.logo}" onerror="this.style.display='none'" alt="${game.homeTeam.abbrev}">
+            ${game.homeTeam.abbrev}
           </span>
         </div>
         <div class="skeleton" style="width:60px;height:14px;border-radius:4px;opacity:0.4;"></div>
@@ -460,11 +495,10 @@ async function loadLineups() {
   status.textContent = 'Fetching schedule…';
 
   try {
-    const dateStr  = formatDate(currentDate);
-    const sched    = await fetchWithFallback(`${NHL_WEB}/schedule/${dateStr}`);
-    const dayEntry = (sched.gameWeek || []).find(d => d.date === dateStr);
-    // Include regular season (2) and playoffs (3), skip preseason (1)
-    const games = (dayEntry?.games || []).filter(g => g.gameType >= 2);
+    const d     = await apiFetch(`${ESPN_NHL}/scoreboard?dates=${formatDateESPN(currentDate)}`);
+    const games = (d.events || [])
+      .filter(e => (e.season?.type ?? 2) >= 2)   // skip preseason (type 1)
+      .map(parseEvent);
 
     if (!games.length) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>No games today</h3><p>Check back on a game day!</p></div>`;
@@ -514,13 +548,8 @@ async function loadLineups() {
     console.error(e);
     grid.innerHTML = `
       <div class="empty-state" style="grid-column:1/-1">
-        <h3>Failed to load rosters</h3>
-        <p style="margin-bottom:12px">${e.message}</p>
-        <p style="font-size:13px;color:#6b7280">
-          If opening as a local file, run a server instead:<br><br>
-          <code style="background:#f3f4f6;padding:4px 8px;border-radius:4px;font-size:12px">python3 -m http.server 8080</code><br><br>
-          Then open <strong>http://localhost:8080/nhl-rosters.html</strong>
-        </p>
+        <h3>Failed to load schedule</h3>
+        <p style="color:#6b7280;font-size:13px;margin-top:8px;">${e.message}</p>
       </div>`;
     status.className = 'status-bar error';
     status.textContent = `Error: ${e.message}`;
@@ -590,57 +619,54 @@ function updateFilterBtn(checked, total) {
 
 // ── Card builder ──────────────────────────────────────────────────
 function buildGameCard(game) {
-  const away      = game.awayTeam;
-  const home      = game.homeTeam;
-  const awayAbbr  = away.abbrev;
-  const homeAbbr  = home.abbrev;
-  const awayScore = game.gameState !== 'FUT' && game.gameState !== 'PRE' ? (away.score ?? '') : '';
-  const homeScore = game.gameState !== 'FUT' && game.gameState !== 'PRE' ? (home.score ?? '') : '';
-  const awayRec   = away.wins != null ? `${away.wins}-${away.losses}-${away.otLosses}` : '';
-  const homeRec   = home.wins != null ? `${home.wins}-${home.losses}-${home.otLosses}` : '';
-  const gameTime  = formatGameTime(game);
-  const venue     = game.venue?.default || '';
-  const status    = gameStatusLabel(game);
-  const gcLink    = game.gameCenterLink ? `https://www.nhl.com${game.gameCenterLink}` : 'https://www.nhl.com/scores';
+  const away       = game.awayTeam;
+  const home       = game.homeTeam;
+  const awayRoster = rosterCache[away.id] || { forwards:[], defensemen:[], goalies:[] };
+  const homeRoster = rosterCache[home.id] || { forwards:[], defensemen:[], goalies:[] };
 
-  const awayRoster = rosterCache[awayAbbr] || { forwards:[], defensemen:[], goalies:[] };
-  const homeRoster = rosterCache[homeAbbr] || { forwards:[], defensemen:[], goalies:[] };
-
-  // ── Score display ──
-  const scoreHtml = (awayScore !== '' && homeScore !== '')
-    ? `<span style="font-size:15px;font-weight:900;letter-spacing:1px;margin-left:6px;">${awayScore}–${homeScore}</span>`
+  const isLive  = game.statusState === 'in';
+  const isFinal = game.statusState === 'post';
+  const scoreHtml = (isLive || isFinal)
+    ? `<span style="font-size:15px;font-weight:900;letter-spacing:1px;margin-left:6px;">${away.score}–${home.score}</span>`
     : '';
+  const timeHtml = isLive
+    ? `<div class="game-status-pill live">${game.statusDetail || 'LIVE'}</div>`
+    : isFinal
+      ? `<div class="game-status-pill final">Final</div>`
+      : `<div class="game-time">${formatGameTime(game.startDate)}</div>`;
 
-  // ── Goalie row (first goalie = depth-chart starter) ──
-  const goalieCell = (goalie) => {
+  // ── Goalie cell ──
+  const goalieCell = goalie => {
     if (!goalie) return `<div class="goalie-cell"><div style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No goalie data</div></div>`;
-    const stats   = playerStatsCache[goalie.id];
-    const name    = playerName(goalie);
-    const num     = goalie.sweaterNumber ?? '—';
-    const catches = goalie.shootsCatches ? ` (${goalie.shootsCatches})` : '';
+    const stats = playerStatsCache[goalie.id];
+    const name  = playerName(goalie);
+    const num   = goalie.jersey ?? '—';
+    const hand  = goalie.hand?.type ? ` (${goalie.hand.type})` : '';
+    const hsrc  = goalie.headshot?.href || ESPN_HS(goalie.id);
+    const href  = playerLink(goalie);
     return `
       <div class="goalie-cell">
-        <img class="goalie-photo" src="${HEADSHOT(goalie.id)}" onerror="this.src='${HS_FB(goalie.id)}';this.onerror=null;" alt="${name}">
+        <img class="goalie-photo" src="${hsrc}" onerror="this.style.display='none'" alt="${name}">
         <div class="goalie-info">
           <div class="goalie-name">
-            <a href="https://www.nhl.com/player/${goalie.id}" target="_blank"
+            <a href="${href}" target="_blank"
               onmouseenter="Promise.all([fetchPlayerStats(${goalie.id}),fetchPtsRolling(${goalie.id})]).then(()=>onStatsLoaded(this,${goalie.id},true))"
-              onmouseleave="hideTooltip()">#${num} ${name}<span style="font-size:10px;font-weight:600;opacity:0.7;">${catches}</span></a>
+              onmouseleave="hideTooltip()">#${num} ${name}<span style="font-size:10px;font-weight:600;opacity:0.7;">${hand}</span></a>
           </div>
           <div class="goalie-stats-line" id="gs-${goalie.id}">${goalieStatsLine(stats)}</div>
         </div>
       </div>`;
   };
 
-  // ── Roster column builder ──
+  // ── Roster column ──
   const buildGroup = (players, label) => {
     if (!players.length) return '';
     const rows = players.map(p => {
       const name = playerName(p);
-      const num  = p.sweaterNumber ?? '—';
-      const hand = p.shootsCatches || '';
-      const pos  = p.positionCode  || '';
-      // Fracs show —/— until stats resolve on hover; PTS frac also triggers rolling tooltip
+      const num  = p.jersey ?? '—';
+      const hand = p.hand?.type || '';
+      const pos  = p.position?.abbreviation || '';
+      const href = playerLink(p);
       const fracs = `<span class="player-stats-inline">
         <span class="stat-frac"><span class="numer" id="sg-${p.id}">—</span><span class="denom" id="cg-${p.id}">—</span></span>
         <span class="stat-frac"><span class="numer" id="sa-${p.id}">—</span><span class="denom" id="ca-${p.id}">—</span></span>
@@ -652,7 +678,7 @@ function buildGameCard(game) {
       </span>`;
       return `<li class="roster-player">
         <span class="jersey-num">#${num}</span>
-        <a class="player-name-link" href="https://www.nhl.com/player/${p.id}" target="_blank"
+        <a class="player-name-link" href="${href}" target="_blank"
           onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>onStatsLoaded(this,${p.id},false))"
           onmouseleave="hideTooltip()">${name}</a>
         ${hand ? `<span class="player-hand">(${hand})</span>` : ''}
@@ -663,7 +689,7 @@ function buildGameCard(game) {
     return `<li class="pos-group-label">${label}</li>${rows}`;
   };
 
-  const rosterCol = (roster, abbr) => {
+  const rosterCol = (roster, team) => {
     if (!roster.forwards.length && !roster.defensemen.length && !roster.goalies.length)
       return `<div class="tbd-roster">Roster unavailable</div>`;
     return `<ul class="roster-list">
@@ -673,58 +699,54 @@ function buildGameCard(game) {
     </ul>`;
   };
 
-  const awayGoalie = awayRoster.goalies[0] || null;
-  const homeGoalie = homeRoster.goalies[0] || null;
-
   return `
-<div class="game-card" data-away="${awayAbbr}" data-home="${homeAbbr}">
+<div class="game-card" data-away="${away.abbrev}" data-home="${home.abbrev}">
   <div class="game-header">
     <div class="matchup">
       <span class="team-abbr">
-        <img class="team-logo" src="${LOGO_BASE}/${awayAbbr}_light.svg" alt="${awayAbbr}" onerror="this.style.display='none'">
-        ${awayAbbr}
-        ${awayRec ? `<span style="font-weight:400;opacity:0.65;font-size:12px">(${awayRec})</span>` : ''}
+        <img class="team-logo" src="${away.logo}" onerror="this.style.display='none'" alt="${away.abbrev}">
+        ${away.abbrev}
+        ${away.record ? `<span style="font-weight:400;opacity:0.65;font-size:12px">(${away.record})</span>` : ''}
       </span>
       <span class="vs-sep">@</span>
       <span class="team-abbr">
-        <img class="team-logo" src="${LOGO_BASE}/${homeAbbr}_light.svg" alt="${homeAbbr}" onerror="this.style.display='none'">
-        ${homeAbbr}
-        ${homeRec ? `<span style="font-weight:400;opacity:0.65;font-size:12px">(${homeRec})</span>` : ''}
+        <img class="team-logo" src="${home.logo}" onerror="this.style.display='none'" alt="${home.abbrev}">
+        ${home.abbrev}
+        ${home.record ? `<span style="font-weight:400;opacity:0.65;font-size:12px">(${home.record})</span>` : ''}
       </span>
       ${scoreHtml}
     </div>
     <div class="game-meta">
-      <div class="game-time">${status ? '' : gameTime}</div>
-      ${status ? `<div class="game-status-pill ${status.cls}">${status.label}</div>` : ''}
-      <div class="game-venue">${venue}</div>
+      ${timeHtml}
+      <div class="game-venue">${game.venue}</div>
     </div>
   </div>
 
   <div class="goalies-row">
-    ${goalieCell(awayGoalie)}
-    ${goalieCell(homeGoalie)}
+    ${goalieCell(awayRoster.goalies[0] || null)}
+    ${goalieCell(homeRoster.goalies[0] || null)}
   </div>
 
   <div class="rosters-row">
     <div class="roster-col">
       <div class="roster-col-label">
-        <img src="${LOGO_BASE}/${awayAbbr}_light.svg" alt="${awayAbbr}" onerror="this.style.display='none'">
-        ${awayAbbr} Roster
+        <img src="${away.logo}" onerror="this.style.display='none'" alt="${away.abbrev}">
+        ${away.abbrev} Roster
       </div>
-      ${rosterCol(awayRoster, awayAbbr)}
+      ${rosterCol(awayRoster, away)}
     </div>
     <div class="roster-col">
       <div class="roster-col-label">
-        <img src="${LOGO_BASE}/${homeAbbr}_light.svg" alt="${homeAbbr}" onerror="this.style.display='none'">
-        ${homeAbbr} Roster
+        <img src="${home.logo}" onerror="this.style.display='none'" alt="${home.abbrev}">
+        ${home.abbrev} Roster
       </div>
-      ${rosterCol(homeRoster, homeAbbr)}
+      ${rosterCol(homeRoster, home)}
     </div>
   </div>
 
   <div class="game-footer">
-    <a href="${gcLink}" target="_blank">Game Center</a>
-    <a class="primary" href="https://www.nhl.com/scores" target="_blank">Scores</a>
+    <a href="https://www.espn.com/nhl/game/_/gameId/${game.id}" target="_blank">ESPN Game Page</a>
+    <a class="primary" href="https://www.espn.com/nhl/scoreboard" target="_blank">Scores</a>
   </div>
 </div>`;
 }
