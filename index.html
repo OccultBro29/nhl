@@ -320,9 +320,18 @@ async function fetchRoster(abbr) {
   return rosterCache[abbr];
 }
 
+// ── Goalie stats line text (shared by initial render + background update) ──
+function goalieStatsLine(stats) {
+  if (!stats || stats.failed) return 'Loading…';
+  if (stats.sW !== null) return `${stats.sW}-${stats.sL}-${stats.sOTL}, ${stats.sGAA} GAA, ${stats.sSVP} SV%`;
+  return `${stats.sGP} GP this season`;
+}
+
 // ── Player stats (landing endpoint) ──────────────────────────────
 async function fetchPlayerStats(playerId) {
-  if (playerStatsCache[playerId] !== undefined) return playerStatsCache[playerId];
+  const cached = playerStatsCache[playerId];
+  // Short-circuit only on a valid (non-failed) result; retry on failure
+  if (cached !== undefined && !cached?.failed) return cached;
   try {
     const d = await fetchWithFallback(`${NHL_WEB}/player/${playerId}/landing`);
     const now = new Date();
@@ -347,14 +356,16 @@ async function fetchPlayerStats(playerId) {
     playerStatsCache[playerId] = result;
     return result;
   } catch {
-    playerStatsCache[playerId] = null;
+    playerStatsCache[playerId] = { failed: true };
     return null;
   }
 }
 
 // ── Rolling pts/game + last 3 game pts (lazy, game-log endpoint) ─
 async function fetchPtsRolling(playerId) {
-  if (ptsRollingCache[playerId] !== undefined) return ptsRollingCache[playerId];
+  const cached = ptsRollingCache[playerId];
+  // Short-circuit only on a valid result; retry on failure
+  if (cached !== undefined && !cached?.failed) return cached;
   try {
     const sid = currentSeasonId();
     const d = await fetchWithFallback(`${NHL_WEB}/player/${playerId}/game-log/${sid}/2`);
@@ -373,7 +384,7 @@ async function fetchPtsRolling(playerId) {
     };
     return ptsRollingCache[playerId];
   } catch {
-    ptsRollingCache[playerId] = null;
+    ptsRollingCache[playerId] = { failed: true };
     return null;
   }
 }
@@ -404,9 +415,6 @@ function playerName(p) {
   return `${p.firstName?.default || ''} ${p.lastName?.default || ''}`.trim();
 }
 
-function fracHTML(s, c) {
-  return `<span class="stat-frac"><span class="numer">${s}</span><span class="denom">${c}</span></span>`;
-}
 
 const REFRESH_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>`;
 
@@ -451,30 +459,25 @@ async function loadLineups() {
     populateTeamFilter(games);
     status.textContent = `Found ${games.length} game${games.length !== 1 ? 's' : ''}. Fetching rosters…`;
 
-    // Fetch all rosters in parallel
+    // Fetch all rosters in parallel (one call per team — fast)
     const uniqueAbbrs = [...new Set(games.flatMap(g => [g.awayTeam.abbrev, g.homeTeam.abbrev]))];
     await Promise.all(uniqueAbbrs.map(a => fetchRoster(a)));
 
-    // Collect all unique player IDs across all rosters
-    const uniqueIds = [...new Set(
-      uniqueAbbrs.flatMap(abbr => {
-        const r = rosterCache[abbr] || { forwards:[], defensemen:[], goalies:[] };
-        return [...r.forwards, ...r.defensemen, ...r.goalies].map(p => p.id);
-      })
-    )];
-
-    status.textContent = `Fetching stats for ${uniqueIds.length} players…`;
-
-    // Batch player stat fetches — 12 at a time
-    for (let i = 0; i < uniqueIds.length; i += 12) {
-      await Promise.all(uniqueIds.slice(i, i + 12).map(id => fetchPlayerStats(id)));
-      if (i % 48 === 0)
-        status.textContent = `Fetching stats… ${Math.min(i + 12, uniqueIds.length)} / ${uniqueIds.length}`;
-    }
-
-    const cards = await Promise.all(games.map(g => buildGameCard(g)));
+    // Render cards immediately — rosters are all we need for the initial paint
+    const cards = games.map(g => buildGameCard(g));
     grid.innerHTML = cards.join('');
-    status.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+    status.textContent = `Last updated: ${new Date().toLocaleTimeString()} — hover players for stats`;
+
+    // Background: fetch goalie stats and patch their stat lines as each resolves
+    const goalieIds = [...new Set(
+      uniqueAbbrs.flatMap(abbr => (rosterCache[abbr]?.goalies || []).slice(0, 2).map(p => p.id))
+    )];
+    goalieIds.forEach(id => {
+      fetchPlayerStats(id).then(stats => {
+        const el = document.getElementById(`gs-${id}`);
+        if (el) el.textContent = goalieStatsLine(stats);
+      });
+    });
 
   } catch(e) {
     console.error(e);
@@ -555,7 +558,7 @@ function updateFilterBtn(checked, total) {
 }
 
 // ── Card builder ──────────────────────────────────────────────────
-async function buildGameCard(game) {
+function buildGameCard(game) {
   const away      = game.awayTeam;
   const home      = game.homeTeam;
   const awayAbbr  = away.abbrev;
@@ -584,22 +587,16 @@ async function buildGameCard(game) {
     const name    = playerName(goalie);
     const num     = goalie.sweaterNumber ?? '—';
     const catches = goalie.shootsCatches ? ` (${goalie.shootsCatches})` : '';
-    let statsLine = 'G';
-    if (stats && stats.sW !== null) {
-      statsLine = `${stats.sW}-${stats.sL}-${stats.sOTL}, ${stats.sGAA} GAA, ${stats.sSVP} SV%`;
-    } else if (stats) {
-      statsLine = `${stats.sGP} GP season`;
-    }
     return `
       <div class="goalie-cell">
         <img class="goalie-photo" src="${HEADSHOT(goalie.id)}" onerror="this.src='${HS_FB(goalie.id)}';this.onerror=null;" alt="${name}">
         <div class="goalie-info">
           <div class="goalie-name">
             <a href="https://www.nhl.com/player/${goalie.id}" target="_blank"
-              onmouseenter="fetchPtsRolling(${goalie.id}).then(()=>showTooltip(this,${goalie.id},true))"
+              onmouseenter="Promise.all([fetchPlayerStats(${goalie.id}),fetchPtsRolling(${goalie.id})]).then(()=>onStatsLoaded(this,${goalie.id},true))"
               onmouseleave="hideTooltip()">#${num} ${name}<span style="font-size:10px;font-weight:600;opacity:0.7;">${catches}</span></a>
           </div>
-          <div class="goalie-stats-line">${statsLine}</div>
+          <div class="goalie-stats-line" id="gs-${goalie.id}">${goalieStatsLine(stats)}</div>
         </div>
       </div>`;
   };
@@ -608,30 +605,27 @@ async function buildGameCard(game) {
   const buildGroup = (players, label) => {
     if (!players.length) return '';
     const rows = players.map(p => {
-      const stats = playerStatsCache[p.id];
-      const name  = playerName(p);
-      const num   = p.sweaterNumber ?? '—';
-      const hand  = p.shootsCatches || '';
-      const pos   = p.positionCode  || '';
-      const sG    = stats?.sG   ?? 0;   const cG   = stats?.cG   ?? 0;
-      const sA    = stats?.sA   ?? 0;   const cA   = stats?.cA   ?? 0;
-      const sPTS  = stats?.sPTS ?? 0;   const cPTS = stats?.cPTS ?? 0;
-
-      const gFrac = `<span class="stat-frac"><span class="numer">${sG}</span><span class="denom">${cG}</span></span>`;
-      const aFrac = `<span class="stat-frac"><span class="numer">${sA}</span><span class="denom">${cA}</span></span>`;
-      const ptsFrac = `<span class="stat-frac" style="cursor:pointer;"
-        onmouseenter="fetchPtsRolling(${p.id}).then(()=>showPtsRolling(this,${p.id}))"
-        onmouseleave="hidePtsRolling()">
-          <span class="numer">${sPTS}</span><span class="denom">${cPTS}</span>
-        </span>`;
-
+      const name = playerName(p);
+      const num  = p.sweaterNumber ?? '—';
+      const hand = p.shootsCatches || '';
+      const pos  = p.positionCode  || '';
+      // Fracs show —/— until stats resolve on hover; PTS frac also triggers rolling tooltip
+      const fracs = `<span class="player-stats-inline">
+        <span class="stat-frac"><span class="numer" id="sg-${p.id}">—</span><span class="denom" id="cg-${p.id}">—</span></span>
+        <span class="stat-frac"><span class="numer" id="sa-${p.id}">—</span><span class="denom" id="ca-${p.id}">—</span></span>
+        <span class="stat-frac" style="cursor:default;"
+          onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>{updatePlayerFracs(${p.id});showPtsRolling(this,${p.id})})"
+          onmouseleave="hidePtsRolling()">
+          <span class="numer" id="spts-${p.id}">—</span><span class="denom" id="cpts-${p.id}">—</span>
+        </span>
+      </span>`;
       return `<li class="roster-player">
         <span class="jersey-num">#${num}</span>
         <a class="player-name-link" href="https://www.nhl.com/player/${p.id}" target="_blank"
-          onmouseenter="fetchPtsRolling(${p.id}).then(()=>showTooltip(this,${p.id},false))"
+          onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>onStatsLoaded(this,${p.id},false))"
           onmouseleave="hideTooltip()">${name}</a>
         ${hand ? `<span class="player-hand">(${hand})</span>` : ''}
-        <span class="player-stats-inline">${gFrac}${aFrac}${ptsFrac}</span>
+        ${fracs}
         <span class="player-pos">${pos}</span>
       </li>`;
     }).join('');
@@ -704,6 +698,27 @@ async function buildGameCard(game) {
 </div>`;
 }
 
+// ── DOM helpers: patch frac cells after lazy load ─────────────────
+function updatePlayerFracs(playerId) {
+  const stats = playerStatsCache[playerId];
+  if (!stats || stats.failed) return;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val ?? '—'; };
+  set(`sg-${playerId}`,   stats.sG);    set(`cg-${playerId}`,   stats.cG);
+  set(`sa-${playerId}`,   stats.sA);    set(`ca-${playerId}`,   stats.cA);
+  set(`spts-${playerId}`, stats.sPTS);  set(`cpts-${playerId}`, stats.cPTS);
+}
+
+// Called after both fetchPlayerStats + fetchPtsRolling resolve on hover
+function onStatsLoaded(el, playerId, goalieMode) {
+  updatePlayerFracs(playerId);
+  // Also update goalie stat line in case it was still "Loading…"
+  if (goalieMode) {
+    const gsEl = document.getElementById(`gs-${playerId}`);
+    if (gsEl) gsEl.textContent = goalieStatsLine(playerStatsCache[playerId]);
+  }
+  showTooltip(el, playerId, goalieMode);
+}
+
 // ── Player name tooltip ───────────────────────────────────────────
 function formatDOB(ds) {
   if (!ds) return '';
@@ -756,7 +771,7 @@ function showPtsRolling(el, playerId) {
   const tip    = document.getElementById('pts-rolling-tooltip');
   const stats  = playerStatsCache[playerId];
   const recent = ptsRollingCache[playerId];
-  if (!recent) return;
+  if (!recent || recent.failed) return;
 
   const sPTS = stats?.sPTS ?? '—';
   const cPTS = stats?.cPTS ?? '—';
