@@ -226,9 +226,29 @@
 </div>
 
 <script>
-// ESPN NHL API — open CORS headers, no proxy needed
+// ESPN — open CORS, used for schedule + roster
 const ESPN_NHL = 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl';
 const ESPN_HS  = id => `https://a.espncdn.com/i/headshots/nhl/players/full/${id}.png`;
+
+// NHL Web API — CORS-blocked, used for stats only (lazy/on-hover, so proxying 1-2 calls at a time is fine)
+const NHL_WEB = 'https://api-web.nhle.com/v1';
+let _proxy = null;
+
+async function fetchNHL(url) {
+  const proxies = [
+    u => fetch(`https://corsproxy.io/?${encodeURIComponent(u)}`),
+    u => fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`),
+    u => fetch(`https://api.cors.lol/?url=${encodeURIComponent(u)}`),
+  ];
+  if (_proxy !== null) {
+    try { const r = await proxies[_proxy](url); if (r.ok) return r.json(); } catch {}
+    _proxy = null;
+  }
+  for (let i = 0; i < proxies.length; i++) {
+    try { const r = await proxies[i](url); if (r.ok) { _proxy = i; return r.json(); } } catch {}
+  }
+  throw new Error('All proxies failed');
+}
 
 let currentDate      = new Date();
 let allGames         = [];
@@ -295,19 +315,22 @@ async function fetchRoster(teamId) {
   if (cached && !cached.failed) return cached;
   try {
     const d = await apiFetch(`${ESPN_NHL}/teams/${teamId}/roster`);
-    console.log(`[roster ${teamId}] keys:`, Object.keys(d), '| athletes[0]:', JSON.stringify(d.athletes?.[0]).slice(0, 200));
+    // ESPN wraps grouped athletes under either `athletes` or `roster`
     const arr = d.athletes || d.roster || [];
     let forwards = [], defensemen = [], goalies = [];
 
-    if (arr.length && arr[0]?.items !== undefined) {
-      // ── Grouped format: [{ position: "Forwards", items: [...] }, ...] ──
+    // Grouped format: [{ position: "Forwards", items|athletes: [...] }, ...]
+    // ESPN uses "items" in some versions and "athletes" in others
+    const firstGroup = arr[0];
+    const groupPlayers = g => g.items || g.athletes || [];
+    if (arr.length && (firstGroup?.items !== undefined || firstGroup?.athletes !== undefined)) {
       const posStr = g => (typeof g.position === 'string'
         ? g.position
         : (g.position?.displayName || g.position?.name || '')
       ).toLowerCase();
-      forwards   = arr.find(g => posStr(g).includes('forward'))?.items || [];
-      defensemen = arr.find(g => posStr(g).includes('defens'))?.items  || [];
-      goalies    = arr.find(g => posStr(g).includes('goal'))?.items    || [];
+      forwards   = groupPlayers(arr.find(g => posStr(g).includes('forward')) || {});
+      defensemen = groupPlayers(arr.find(g => posStr(g).includes('defens'))  || {});
+      goalies    = groupPlayers(arr.find(g => posStr(g).includes('goal'))    || {});
     } else {
       // ── Flat format: each element is a player ──
       // ESPN position.parent.name = "Forward" / "Defenseman" / "Goaltender"
@@ -349,53 +372,30 @@ function goalieStatsLine(stats) {
   return `${stats.sGP} GP this season`;
 }
 
-// ── Player stats ──────────────────────────────────────────────────
+// ── Player stats — NHL Web API via proxy (lazy/on-hover only) ────
 async function fetchPlayerStats(playerId) {
   const cached = playerStatsCache[playerId];
-  // Short-circuit only on a full valid result; retry stubs (just dob) and failures
   if (cached && !cached.failed && cached.sGP !== undefined) return cached;
   const existingDob = playerStatsCache[playerId]?.dob || null;
   try {
-    const d = await apiFetch(`${ESPN_NHL}/athletes/${playerId}/stats`);
-
-    // ESPN returns splits as an array or object; find season vs career
-    const splitsArr = d.splits ? (Array.isArray(d.splits) ? d.splits : [d.splits]) : [];
-    const careerSplit = splitsArr.find(s => /career/i.test(s.name || s.abbreviation || ''));
-    const seasonSplit = splitsArr.find(s => !/career/i.test(s.name || s.abbreviation || '')) || splitsArr[0];
-    const sCats = seasonSplit?.categories || d.splits?.categories || [];
-    const cCats = careerSplit?.categories || [];
-
-    const getStat = (cats, ...names) => {
-      for (const cat of cats) {
-        for (const name of names) {
-          const s = (cat.stats || []).find(s =>
-            s.name?.toLowerCase() === name.toLowerCase() ||
-            s.abbreviation?.toLowerCase() === name.toLowerCase()
-          );
-          if (s?.value != null) return s.value;
-        }
-      }
-      return null;
-    };
-
-    const fmt2 = v => v != null ? parseFloat(v).toFixed(2) : null;
-    const fmt3 = v => v != null ? parseFloat(v).toFixed(3).replace('0.', '.') : null;
-
+    const d = await fetchNHL(`${NHL_WEB}/player/${playerId}/landing`);
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth() + 1;
+    const start = m >= 10 ? y : y - 1;
+    const seasonId = start * 10000 + (start + 1);
+    const career = d.careerTotals?.regularSeason || {};
+    const s = (d.seasonTotals || []).find(t => t.season === seasonId && t.gameTypeId === 2) || {};
     const result = {
-      dob:  existingDob,
-      sGP:  getStat(sCats, 'gamesPlayed', 'gp'),
-      cGP:  getStat(cCats, 'gamesPlayed', 'gp'),
-      sG:   getStat(sCats, 'goals', 'g'),
-      cG:   getStat(cCats, 'goals', 'g'),
-      sA:   getStat(sCats, 'assists', 'a'),
-      cA:   getStat(cCats, 'assists', 'a'),
-      sPTS: getStat(sCats, 'points', 'pts', 'p'),
-      cPTS: getStat(cCats, 'points', 'pts', 'p'),
-      sW:   getStat(sCats, 'wins', 'w'),
-      sL:   getStat(sCats, 'losses', 'l'),
-      sOTL: getStat(sCats, 'overtimeLosses', 'otlosses', 'otl'),
-      sGAA: fmt2(getStat(sCats, 'goalsAgainstAverage', 'gaa')),
-      sSVP: fmt3(getStat(sCats, 'savePercentage', 'savepctg', 'sv%', 'svp')),
+      dob:  d.birthDate || existingDob,
+      sGP:  s.gamesPlayed  ?? 0,   cGP:  career.gamesPlayed ?? 0,
+      sG:   s.goals        ?? 0,   cG:   career.goals       ?? 0,
+      sA:   s.assists      ?? 0,   cA:   career.assists     ?? 0,
+      sPTS: s.points       ?? 0,   cPTS: career.points      ?? 0,
+      sW:   s.wins   ?? null,
+      sL:   s.losses ?? null,
+      sOTL: s.otLosses ?? null,
+      sGAA: s.goalsAgainstAverage != null ? parseFloat(s.goalsAgainstAverage).toFixed(2) : null,
+      sSVP: s.savePctg        != null ? parseFloat(s.savePctg).toFixed(3).replace('0.', '.') : null,
     };
     playerStatsCache[playerId] = result;
     return result;
@@ -406,54 +406,24 @@ async function fetchPlayerStats(playerId) {
   }
 }
 
-// ── Rolling pts/game ─────────────────────────────────────────────
+// ── Rolling pts/game — NHL Web API via proxy (lazy/on-hover only) ─
 async function fetchPtsRolling(playerId) {
   const cached = ptsRollingCache[playerId];
   if (cached && !cached.failed) return cached;
   try {
-    const d = await apiFetch(`${ESPN_NHL}/athletes/${playerId}/gamelog`);
-
-    // ESPN gamelog: either seasonTypes[].events[] or a flat events object/array
-    let events = [];
-    if (d.seasonTypes) {
-      const reg = d.seasonTypes.find(t => t.id === '2' || /regular/i.test(t.type || t.name || ''));
-      events = reg?.events || [];
-    } else if (Array.isArray(d.events)) {
-      events = d.events;
-    } else if (d.events) {
-      events = Object.values(d.events);
-    }
-
-    // Resolve stat indices for ESPN's parallel-array format
-    const labels = d.names || d.labels || [];
-    const idxOf  = (...ns) => {
-      for (const n of ns) {
-        const i = labels.findIndex(l => l.toLowerCase() === n.toLowerCase());
-        if (i >= 0) return i;
-      }
-      return -1;
-    };
-    const gIdx = idxOf('goals', 'g');
-    const aIdx = idxOf('assists', 'a');
-
-    const getPts = e => {
-      const s = e.stats;
-      if (!s) return 0;
-      if (Array.isArray(s))
-        return (gIdx >= 0 ? +s[gIdx] || 0 : 0) + (aIdx >= 0 ? +s[aIdx] || 0 : 0);
-      return (+s.goals || +s.G || 0) + (+s.assists || +s.A || 0);
-    };
-
-    const sorted = [...events].sort((a, b) =>
-      new Date(b.gameDate || b.date || 0) - new Date(a.gameDate || a.date || 0)
-    );
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth() + 1;
+    const start = m >= 10 ? y : y - 1;
+    const sid = `${start}${start + 1}`;
+    const d = await fetchNHL(`${NHL_WEB}/player/${playerId}/game-log/${sid}/2`);
+    const splits = [...(d.gameLog || [])].reverse(); // most-recent first
+    const pts = g => (g.goals || 0) + (g.assists || 0);
     const avg = n => {
-      const sl = sorted.slice(0, n);
-      return sl.length ? (sl.reduce((s, e) => s + getPts(e), 0) / sl.length).toFixed(2) : '—';
+      const sl = splits.slice(0, n);
+      return sl.length ? (sl.reduce((s, g) => s + pts(g), 0) / sl.length).toFixed(2) : '—';
     };
-
     ptsRollingCache[playerId] = {
-      lastPts: sorted.slice(0, 3).map(getPts),
+      lastPts: splits.slice(0, 3).map(pts),
       l7: avg(7), l15: avg(15), l30: avg(30),
     };
     return ptsRollingCache[playerId];
@@ -717,10 +687,8 @@ function buildGameCard(game) {
   };
 
   const rosterCol = (roster, team) => {
-    if (!roster.forwards.length && !roster.defensemen.length && !roster.goalies.length) {
-      const why = roster.failed ? 'fetch error — check console' : 'empty response from ESPN';
-      return `<div class="tbd-roster">Roster unavailable (${why})</div>`;
-    }
+    if (!roster.forwards.length && !roster.defensemen.length && !roster.goalies.length)
+      return `<div class="tbd-roster">Roster unavailable</div>`;
     return `<ul class="roster-list">
       ${buildGroup(roster.forwards,   'Forwards')}
       ${buildGroup(roster.defensemen, 'Defense')}
