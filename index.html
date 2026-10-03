@@ -266,18 +266,23 @@ updateDateDisplay();
 
 // ── Schedule parser ───────────────────────────────────────────────
 function parseEvent(ev) {
-  const comp   = ev.competitions?.[0] || {};
-  const home   = comp.competitors?.find(c => c.homeAway === 'home') || {};
-  const away   = comp.competitors?.find(c => c.homeAway === 'away') || {};
+  const comp = ev.competitions?.[0] || {};
+  // homeAway is reliably lowercase "home"/"away" in ESPN's NHL feed
+  const home = comp.competitors?.find(c => c.homeAway === 'home')
+            || comp.competitors?.[0] || {};
+  const away = comp.competitors?.find(c => c.homeAway === 'away')
+            || comp.competitors?.[1] || {};
   const status = comp.status || {};
   const rec    = c => (c.records || []).find(r => r.type === 'total')?.summary || '';
+  // team.id and competitor id are the same value in ESPN NHL; use either
+  const tid = c => c.team?.id || c.id || '';
   return {
     id:           ev.id,
-    homeTeam:     { id: home.team?.id || '', abbrev: home.team?.abbreviation || '', logo: home.team?.logo || '', score: home.score ?? '', record: rec(home) },
-    awayTeam:     { id: away.team?.id || '', abbrev: away.team?.abbreviation || '', logo: away.team?.logo || '', score: away.score ?? '', record: rec(away) },
+    homeTeam:     { id: tid(home), abbrev: home.team?.abbreviation || '', logo: home.team?.logo || '', score: home.score ?? '', record: rec(home) },
+    awayTeam:     { id: tid(away), abbrev: away.team?.abbreviation || '', logo: away.team?.logo || '', score: away.score ?? '', record: rec(away) },
     venue:        comp.venue?.fullName || '',
     startDate:    ev.date || '',
-    statusState:  status.type?.state || 'pre',   // 'pre' | 'in' | 'post'
+    statusState:  status.type?.state || 'pre',
     statusDetail: status.type?.shortDetail || '',
     seasonType:   ev.season?.type ?? 2,
   };
@@ -285,22 +290,44 @@ function parseEvent(ev) {
 
 // ── Roster fetch ─────────────────────────────────────────────────
 async function fetchRoster(teamId) {
+  if (!teamId) return { forwards: [], defensemen: [], goalies: [] };
   const cached = rosterCache[teamId];
   if (cached && !cached.failed) return cached;
   try {
     const d = await apiFetch(`${ESPN_NHL}/teams/${teamId}/roster`);
-    // ESPN groups athletes by position: [{ position: "Forwards", items: [...] }, ...]
-    const grp = kw =>
-      (d.athletes || []).find(g => {
-        const name = typeof g.position === 'string' ? g.position : (g.position?.name || '');
-        return name.toLowerCase().includes(kw);
-      })?.items || [];
+    console.log(`[roster ${teamId}] keys:`, Object.keys(d), '| athletes[0]:', JSON.stringify(d.athletes?.[0]).slice(0, 200));
+    const arr = d.athletes || d.roster || [];
+    let forwards = [], defensemen = [], goalies = [];
 
-    const forwards   = grp('forward');
-    const defensemen = grp('defens');
-    const goalies    = grp('goal');
+    if (arr.length && arr[0]?.items !== undefined) {
+      // ── Grouped format: [{ position: "Forwards", items: [...] }, ...] ──
+      const posStr = g => (typeof g.position === 'string'
+        ? g.position
+        : (g.position?.displayName || g.position?.name || '')
+      ).toLowerCase();
+      forwards   = arr.find(g => posStr(g).includes('forward'))?.items || [];
+      defensemen = arr.find(g => posStr(g).includes('defens'))?.items  || [];
+      goalies    = arr.find(g => posStr(g).includes('goal'))?.items    || [];
+    } else {
+      // ── Flat format: each element is a player ──
+      // ESPN position.parent.name = "Forward" / "Defenseman" / "Goaltender"
+      const classify = p => {
+        const abbr   = (p.position?.abbreviation || '').toUpperCase();
+        const name   = (p.position?.name || p.position?.displayName || '').toLowerCase();
+        const parent = (p.position?.parent?.name || p.position?.parent?.displayName || '').toLowerCase();
+        if (abbr === 'G'  || name.includes('goal')  || parent.includes('goal'))   return 'G';
+        if (abbr === 'D'  || name.includes('defens') || parent.includes('defens')) return 'D';
+        return 'F';
+      };
+      arr.forEach(p => {
+        const c = classify(p);
+        if      (c === 'G') goalies.push(p);
+        else if (c === 'D') defensemen.push(p);
+        else                forwards.push(p);
+      });
+    }
 
-    // Pre-seed DOB from roster so the tooltip has it before the stats call
+    // Pre-seed DOB into playerStatsCache so the tooltip has it before the stats hover
     [...forwards, ...defensemen, ...goalies].forEach(p => {
       if (!playerStatsCache[p.id] || playerStatsCache[p.id].failed) {
         playerStatsCache[p.id] = { dob: p.dateOfBirth?.substring(0, 10) || null };
@@ -309,7 +336,7 @@ async function fetchRoster(teamId) {
 
     rosterCache[teamId] = { forwards, defensemen, goalies };
   } catch(e) {
-    console.warn('fetchRoster failed for team', teamId, e.message);
+    console.error('fetchRoster failed — team', teamId, e);
     rosterCache[teamId] = { failed: true, forwards: [], defensemen: [], goalies: [] };
   }
   return rosterCache[teamId];
@@ -690,8 +717,10 @@ function buildGameCard(game) {
   };
 
   const rosterCol = (roster, team) => {
-    if (!roster.forwards.length && !roster.defensemen.length && !roster.goalies.length)
-      return `<div class="tbd-roster">Roster unavailable</div>`;
+    if (!roster.forwards.length && !roster.defensemen.length && !roster.goalies.length) {
+      const why = roster.failed ? 'fetch error — check console' : 'empty response from ESPN';
+      return `<div class="tbd-roster">Roster unavailable (${why})</div>`;
+    }
     return `<ul class="roster-list">
       ${buildGroup(roster.forwards,   'Forwards')}
       ${buildGroup(roster.defensemen, 'Defense')}
