@@ -290,7 +290,13 @@ function parseEvent(ev) {
   const away = comp.competitors?.find(c => c.homeAway === 'away')
             || comp.competitors?.[1] || {};
   const status = comp.status || {};
-  const rec    = c => (c.records || []).find(r => r.type === 'total')?.summary || '';
+  const rec    = c => {
+    if (c.records?.length) {
+      const r = c.records.find(r => r.type === 'total' || r.type === 'overall' || /^(all|total)$/i.test(r.name || ''));
+      if (r?.summary) return r.summary;
+    }
+    return c.record || '';   // fallback: ESPN sometimes puts record as a plain string
+  };
   // team.id and competitor id are the same value in ESPN NHL; use either
   const tid = c => c.team?.id || c.id || '';
   return {
@@ -316,39 +322,45 @@ async function fetchRoster(teamId) {
     const arr = d.athletes || d.roster || [];
     let forwards = [], defensemen = [], goalies = [];
 
-    // Grouped format: [{ position: "Centers"|"Left Wings"|"Defensemen"|"Goalies", items: [...] }, ...]
-    // ESPN NHL splits forwards by specific position — never uses "Forwards" as a group name.
-    // Collect everything that isn't defense or goalies as forwards.
-    const firstGroup = arr[0];
+    // ── Try grouped format first ──
+    // ESPN NHL uses groups like "Centers", "Left Wings", "Right Wings", "Defensemen", "Goalies"
     const groupPlayers = g => g.items || g.athletes || [];
-    if (arr.length && (firstGroup?.items !== undefined || firstGroup?.athletes !== undefined)) {
+    const firstGroup   = arr[0];
+    const hasGroups    = arr.length > 0 && (firstGroup?.items?.length > 0 || firstGroup?.athletes?.length > 0
+                          || (firstGroup && ('items' in firstGroup || 'athletes' in firstGroup)));
+
+    if (hasGroups) {
       const posStr = g => (typeof g.position === 'string'
         ? g.position
         : (g.position?.displayName || g.position?.name || '')
       ).toLowerCase();
-      const isDefenseGrp = g => posStr(g).includes('defens');
-      const isGoalieGrp  = g => posStr(g).includes('goal');
-      forwards   = arr.filter(g => !isDefenseGrp(g) && !isGoalieGrp(g)).flatMap(groupPlayers);
-      defensemen = groupPlayers(arr.find(isDefenseGrp) || {});
-      goalies    = groupPlayers(arr.find(isGoalieGrp)  || {});
-    } else {
-      // ── Flat format: each element is a player ──
-      // ESPN position.parent.name = "Forward" / "Defenseman" / "Goaltender"
+      const isDefGrp  = g => posStr(g).includes('defens');
+      const isGoalGrp = g => posStr(g).includes('goal');
+      forwards   = arr.filter(g => !isDefGrp(g) && !isGoalGrp(g)).flatMap(groupPlayers);
+      defensemen = groupPlayers(arr.find(isDefGrp)  || {});
+      goalies    = groupPlayers(arr.find(isGoalGrp) || {});
+    }
+
+    // ── Flat format fallback (each element is a player, not a group) ──
+    if (!forwards.length && !defensemen.length && !goalies.length && arr.length) {
       const classify = p => {
         const abbr   = (p.position?.abbreviation || '').toUpperCase();
         const name   = (p.position?.name || p.position?.displayName || '').toLowerCase();
         const parent = (p.position?.parent?.name || p.position?.parent?.displayName || '').toLowerCase();
-        if (abbr === 'G'  || name.includes('goal')  || parent.includes('goal'))   return 'G';
-        if (abbr === 'D'  || name.includes('defens') || parent.includes('defens')) return 'D';
+        if (abbr === 'G' || name.includes('goal')   || parent.includes('goal'))   return 'G';
+        if (abbr === 'D' || name.includes('defens')  || parent.includes('defens')) return 'D';
         return 'F';
       };
       arr.forEach(p => {
+        if (!p?.id) return;
         const c = classify(p);
         if      (c === 'G') goalies.push(p);
         else if (c === 'D') defensemen.push(p);
         else                forwards.push(p);
       });
     }
+
+    console.log(`[roster ${teamId}] groups=${arr.length} hasGroups=${hasGroups} F=${forwards.length} D=${defensemen.length} G=${goalies.length}`);
 
     // Pre-seed DOB + isGoalie so the tooltip has context before the stats hover
     const seedPlayer = (p, isGoalie) => {
@@ -359,9 +371,15 @@ async function fetchRoster(teamId) {
     defensemen.forEach(p => seedPlayer(p, false));
     goalies.forEach(p    => seedPlayer(p, true));
 
-    rosterCache[teamId] = { forwards, defensemen, goalies };
+    if (forwards.length || defensemen.length || goalies.length) {
+      rosterCache[teamId] = { forwards, defensemen, goalies };
+    } else {
+      // Got a response but parsed no players — don't cache success so next refresh retries
+      console.warn(`[roster ${teamId}] parsed 0 players; will retry next refresh`);
+      rosterCache[teamId] = { failed: true, forwards: [], defensemen: [], goalies: [] };
+    }
   } catch(e) {
-    console.error('fetchRoster failed — team', teamId, e);
+    console.error('[roster ' + teamId + '] fetch failed:', e.message);
     rosterCache[teamId] = { failed: true, forwards: [], defensemen: [], goalies: [] };
   }
   return rosterCache[teamId];
@@ -1067,17 +1085,23 @@ async function runDiagnostics() {
     }
   } catch(e) { log(`   ✗ ${e.message}`, 'diag-err'); }
 
-  // ── 3. NHL Web API roster — via proxy ───────────────────────────
-  log(`\n── NHL Web API roster  (via proxy) ──`);
-  const nhlRosterUrl = `${NHL_WEB}/roster/${testAbbr}/current`;
-  log(`   ${nhlRosterUrl}`, 'diag-key');
-  try {
-    const d = await fetchNHL(nhlRosterUrl);
-    const fwd = (d.forwards||[]).length, def = (d.defensemen||[]).length, gtl = (d.goalies||[]).length;
-    log(`   ✓ forwards=${fwd}  defensemen=${def}  goalies=${gtl}`,
-      fwd + def + gtl > 0 ? 'diag-ok' : 'diag-err');
-    if (!testPlayerId && d.forwards?.[0]) testPlayerId = String(d.forwards[0].id);
-  } catch(e) { log(`   ✗ ${e.message}`, 'diag-err'); }
+  // ── 3. Roster cache contents ──────────────────────────────────────
+  log(`\n── Roster cache (loaded teams) ──`);
+  const cachedTeams = Object.keys(rosterCache);
+  if (!cachedTeams.length) {
+    log(`   empty — load games first`, 'diag-warn');
+  } else {
+    cachedTeams.forEach(id => {
+      const r = rosterCache[id];
+      const status = r.failed ? '✗ failed' : `✓ F=${r.forwards.length} D=${r.defensemen.length} G=${r.goalies.length}`;
+      log(`   team ${id}: ${status}`, r.failed ? 'diag-err' : 'diag-ok');
+      // Grab player id if we haven't found one yet
+      if (!testPlayerId && !r.failed) {
+        const p = [...(r.forwards||[]), ...(r.defensemen||[]), ...(r.goalies||[])][0];
+        if (p?.id) testPlayerId = String(p.id);
+      }
+    });
+  }
 
   if (!testPlayerId) {
     log('\nNo player id — skipping stat endpoint tests.', 'diag-warn');
