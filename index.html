@@ -624,7 +624,33 @@ async function loadLineups() {
       });
     }));
 
-    status.textContent = `Last updated: ${new Date().toLocaleTimeString()} — hover players for stats`;
+    status.textContent = `Last updated: ${new Date().toLocaleTimeString()} — loading player stats…`;
+
+    // Background-fetch stats for every rostered player, filling fracs as each resolves.
+    // Concurrency-limited so we don't saturate the browser's connection pool.
+    const allIds = [...new Set(
+      Object.values(rosterCache)
+        .filter(r => !r.failed)
+        .flatMap(r => [...r.forwards, ...r.defensemen, ...r.goalies].map(p => p.id))
+    )];
+    const STAT_LIMIT = 8;
+    let statActive = 0;
+    const statQueue = [...allIds];
+
+    function drainStats() {
+      while (statActive < STAT_LIMIT && statQueue.length) {
+        const id = statQueue.shift();
+        statActive++;
+        fetchPlayerStats(id)
+          .then(() => { updatePlayerFracs(id); })
+          .finally(() => {
+            statActive--;
+            if (statQueue.length || statActive > 0) drainStats();
+            else status.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+          });
+      }
+    }
+    drainStats();
 
   } catch(e) {
     console.error(e);
