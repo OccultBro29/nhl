@@ -431,8 +431,8 @@ async function fetchPlayerStats(playerId) {
     }
 
     // ── Season from sports.core (more current; overrides cv3 season backup) ──
-    if (coreRes.status === 'fulfilled') {
-      for (const cat of (coreRes.value?.splits?.categories || [])) {
+    const parseCoreStats = cats => {
+      for (const cat of (cats || [])) {
         for (const s of (cat.stats || [])) {
           const v = s.displayValue;
           switch (s.name) {
@@ -449,7 +449,12 @@ async function fetchPlayerStats(playerId) {
           }
         }
       }
-    }
+    };
+
+    if (coreRes.status === 'fulfilled')
+      parseCoreStats(coreRes.value?.splits?.categories);
+
+
 
     const result = {
       dob:      existingDob,
