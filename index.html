@@ -479,13 +479,14 @@ async function fetchPtsRolling(playerId) {
     );
     // common/v3 gamelog: events keyed by event ID, labels + values arrays
     const labels  = d.labels  || d.names  || [];
-    const goalsIdx   = labels.findIndex(l => /^goals?$/i.test(l));
-    const assistsIdx = labels.findIndex(l => /^assists?$/i.test(l));
+    const goalsIdx   = labels.findIndex(l => l === 'G' || /^goals?$/i.test(l));
+    const assistsIdx = labels.findIndex(l => l === 'A' || /^assists?$/i.test(l));
 
     // Collect all game entries, most-recent first
     let games = [];
-    if (d.seasonTypes) {
-      const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.name || ''));
+    if (d.seasonTypes?.length) {
+      const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.name || ''))
+               || d.seasonTypes[0];   // if only one entry, use it regardless of name
       games = (reg?.events || []).slice().reverse();
     } else if (d.events) {
       const evts = Array.isArray(d.events) ? d.events : Object.values(d.events);
@@ -702,8 +703,8 @@ function updateFilterBtn(checked, total) {
 function buildGameCard(game) {
   const away       = game.awayTeam;
   const home       = game.homeTeam;
-  const awayRoster = rosterCache[away.id] || { forwards:[], defensemen:[], goalies:[] };
-  const homeRoster = rosterCache[home.id] || { forwards:[], defensemen:[], goalies:[] };
+  const awayRoster = rosterCache[away.abbrev] || { forwards:[], defensemen:[], goalies:[] };
+  const homeRoster = rosterCache[home.abbrev] || { forwards:[], defensemen:[], goalies:[] };
 
   const isLive  = game.statusState === 'in';
   const isFinal = game.statusState === 'post';
