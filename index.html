@@ -196,7 +196,7 @@
     <div>
       <h1 class="page-title">Game Day Rosters</h1>
       <div class="date-badge" id="date-subtitle"></div>
-      <div class="note-bar" style="margin-top:4px;">All times Pacific &nbsp;|&nbsp; G &nbsp;A &nbsp;PTS</div>
+      <div class="note-bar" style="margin-top:4px;">All times Pacific &nbsp;|&nbsp; G &nbsp;A &nbsp;PTS &nbsp;· hover G for shots</div>
     </div>
     <div class="date-nav">
       <button class="date-nav-btn" onclick="changeDate(-1)" title="Previous day">
@@ -412,9 +412,9 @@ async function fetchPlayerStats(playerId) {
     ]);
 
     // ── Career from common/v3 (totals[] parallel to names[]) ──
-    let cGP = null, cG = null, cA = null, cPTS = null;
+    let cGP = null, cG = null, cA = null, cPTS = null, cSOG = null;
     // ── Season from common/v3 seasonTotals[] (backup) or sports.core (primary) ──
-    let sGP = null, sG = null, sA = null, sPTS = null;
+    let sGP = null, sG = null, sA = null, sPTS = null, sSOG = null;
     let sW = null, sL = null, sOTL = null, sGAA = null, sSVP = null;
 
     if (cv3Res.status === 'fulfilled') {
@@ -422,10 +422,11 @@ async function fetchPlayerStats(playerId) {
         (cat.names || []).forEach((nm, i) => {
           const tot = cat.totals?.[i];
           const sea = cat.seasonTotals?.[i];
-          if (nm === 'games' || nm === 'gamesPlayed') { if (tot != null) cGP = tot; if (sea != null) sGP = sea; }
-          if (nm === 'goals')                         { if (tot != null) cG  = tot; if (sea != null) sG  = sea; }
-          if (nm === 'assists')                       { if (tot != null) cA  = tot; if (sea != null) sA  = sea; }
+          if (nm === 'games' || nm === 'gamesPlayed') { if (tot != null) cGP  = tot; if (sea != null) sGP  = sea; }
+          if (nm === 'goals')                         { if (tot != null) cG   = tot; if (sea != null) sG   = sea; }
+          if (nm === 'assists')                       { if (tot != null) cA   = tot; if (sea != null) sA   = sea; }
           if (nm === 'points')                        { if (tot != null) cPTS = tot; if (sea != null) sPTS = sea; }
+          if (nm === 'shots' || nm === 'S')           { if (tot != null) cSOG = tot; if (sea != null) sSOG = sea; }
         });
       }
     }
@@ -436,10 +437,12 @@ async function fetchPlayerStats(playerId) {
         for (const s of (cat.stats || [])) {
           const v = s.displayValue;
           switch (s.name) {
-            case 'goals':               sG   = sG   ?? v; break;
-            case 'assists':             sA   = sA   ?? v; break;
-            case 'points':              sPTS = sPTS ?? v; break;
-            case 'gamesPlayed':         sGP  = sGP  ?? v; break;
+            case 'goals':           if (sG   == null || +sG   === 0) sG   = v; break;
+            case 'assists':         if (sA   == null || +sA   === 0) sA   = v; break;
+            case 'points':          if (sPTS == null || +sPTS === 0) sPTS = v; break;
+            case 'gamesPlayed':     if (sGP  == null || +sGP  === 0) sGP  = v; break;
+            case 'shots':
+            case 'shotsOnGoal':     if (sSOG == null || +sSOG === 0) sSOG = v; break;
             case 'wins':                sW   = v; break;
             case 'losses':              sL   = v; break;
             case 'overtimeLosses':      sOTL = v; break;
@@ -459,10 +462,11 @@ async function fetchPlayerStats(playerId) {
     const result = {
       dob:      existingDob,
       isGoalie: existingIsGoalie,
-      sGP: sGP ?? 0,   cGP: cGP ?? null,
-      sG:  sG  ?? 0,   cG:  cG  ?? null,
-      sA:  sA  ?? 0,   cA:  cA  ?? null,
+      sGP: sGP ?? 0,   cGP:  cGP  ?? null,
+      sG:  sG  ?? 0,   cG:   cG   ?? null,
+      sA:  sA  ?? 0,   cA:   cA   ?? null,
       sPTS: sPTS ?? 0, cPTS: cPTS ?? null,
+      sSOG: sSOG ?? 0, cSOG: cSOG ?? null,
       sW, sL, sOTL, sGAA, sSVP,
     };
     playerStatsCache[playerId] = result;
@@ -483,9 +487,10 @@ async function fetchPtsRolling(playerId) {
       `https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${playerId}/gamelog`
     );
     // common/v3 gamelog: events keyed by event ID, labels + values arrays
-    const labels  = d.labels  || d.names  || [];
-    const goalsIdx   = labels.findIndex(l => l === 'G' || /^goals?$/i.test(l));
-    const assistsIdx = labels.findIndex(l => l === 'A' || /^assists?$/i.test(l));
+    const labels     = d.labels  || d.names  || [];
+    const goalsIdx   = labels.findIndex(l => l === 'G'  || /^goals?$/i.test(l));
+    const assistsIdx = labels.findIndex(l => l === 'A'  || /^assists?$/i.test(l));
+    const shotsIdx   = labels.findIndex(l => l === 'S'  || /^shots?$/i.test(l));
 
     // Collect all game entries, most-recent first
     let games = [];
@@ -507,13 +512,20 @@ async function fetchPtsRolling(playerId) {
       return (+s.goals || +s.G || 0) + (+s.assists || +s.A || 0);
     };
 
+    const getShots = e => {
+      const s = e.stats || e.values || [];
+      if (Array.isArray(s)) return shotsIdx >= 0 ? +s[shotsIdx] || 0 : 0;
+      return +s.shots || +s.S || 0;
+    };
+
     const avg = n => {
       const sl = games.slice(0, n);
       return sl.length ? (sl.reduce((sum, e) => sum + getPts(e), 0) / sl.length).toFixed(2) : '—';
     };
 
     ptsRollingCache[playerId] = {
-      lastPts: games.slice(0, 3).map(getPts),
+      lastPts:   games.slice(0, 3).map(getPts),
+      lastShots: games.slice(0, 5).map(getShots),
       l7: avg(7), l15: avg(15), l30: avg(30),
     };
     return ptsRollingCache[playerId];
@@ -781,7 +793,11 @@ function buildGameCard(game) {
       const pos  = p.position?.abbreviation || '';
       const href = playerLink(p);
       const fracs = `<span class="player-stats-inline">
-        <span class="stat-frac"><span class="numer" id="sg-${p.id}">—</span><span class="denom" id="cg-${p.id}">—</span></span>
+        <span class="stat-frac" style="cursor:default;"
+          onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>showShotsTooltip(this,${p.id}))"
+          onmouseleave="hideShotsTooltip()">
+          <span class="numer" id="sg-${p.id}">—</span><span class="denom" id="cg-${p.id}">—</span>
+        </span>
         <span class="stat-frac"><span class="numer" id="sa-${p.id}">—</span><span class="denom" id="ca-${p.id}">—</span></span>
         <span class="stat-frac" style="cursor:default;"
           onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>{updatePlayerFracs(${p.id});showPtsRolling(this,${p.id})})"
@@ -961,6 +977,45 @@ function showPtsRolling(el, playerId) {
 
 function hidePtsRolling() {
   document.getElementById('pts-rolling-tooltip').classList.remove('visible');
+}
+
+// ── Shots tooltip (on G fraction hover) ──────────────────────────
+function showShotsTooltip(el, playerId) {
+  const tip    = document.getElementById('shots-avg-tooltip');
+  const stats  = playerStatsCache[playerId];
+  const recent = ptsRollingCache[playerId];
+  if (!stats) return;
+
+  const sGP  = +stats.sGP  || 0;
+  const cGP  = +stats.cGP  || 0;
+  const sSOG = +stats.sSOG || 0;
+  const cSOG = +stats.cSOG || 0;
+
+  // Shots per game as fraction: season / career
+  const sSpG = sGP > 0 ? (sSOG / sGP).toFixed(1) : '—';
+  const cSpG = cGP > 0 ? (cSOG / cGP).toFixed(1) : '—';
+
+  // Last 5 game shots as hit-style boxes
+  const shotsHtml = (recent && !recent.failed && recent.lastShots?.length)
+    ? `<span class="tooltip-hits">${recent.lastShots.map(s => `<span class="tooltip-hit">${s}</span>`).join('')}</span>`
+    : '';
+
+  tip.innerHTML =
+    `<span class="tooltip-frac"><span class="tn">${sSpG}</span><span class="td">${cSpG}</span></span>` +
+    `<span class="hat-sep">S/GP</span>` +
+    shotsHtml;
+
+  tip.style.top  = '-9999px';
+  tip.style.left = '-9999px';
+  tip.classList.add('visible');
+  const rect    = el.getBoundingClientRect();
+  const tipRect = tip.getBoundingClientRect();
+  tip.style.left = Math.max(4, rect.left + rect.width / 2 - tipRect.width / 2) + 'px';
+  tip.style.top  = (rect.top - tipRect.height - 4) + 'px';
+}
+
+function hideShotsTooltip() {
+  document.getElementById('shots-avg-tooltip').classList.remove('visible');
 }
 
 // ── Calendar ──────────────────────────────────────────────────────
@@ -1224,6 +1279,7 @@ async function runDiagnostics() {
 <div class="calendar-dropdown" id="calendar-dropdown"></div>
 <div class="player-tooltip" id="player-tooltip"></div>
 <div class="hit-avg-tooltip" id="pts-rolling-tooltip"></div>
+<div class="hit-avg-tooltip" id="shots-avg-tooltip"></div>
 
 <div id="diag-panel">
   <div id="diag-header">
