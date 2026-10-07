@@ -501,17 +501,9 @@ async function fetchPtsRolling(playerId) {
     // Collect all game entries, most-recent first
     let games = [];
     if (d.seasonTypes?.length) {
-      const reg     = d.seasonTypes.find(t => /regular/i.test(t.type || t.name || ''))
-                   || d.seasonTypes[0];
-      const evtsRaw = reg?.events;
-      // common/v3 returns events as an object keyed by event ID, not an array
-      games = Array.isArray(evtsRaw)
-        ? [...evtsRaw]
-        : (evtsRaw && typeof evtsRaw === 'object' ? Object.values(evtsRaw) : []);
-      // Sort most-recent first
-      games = games.sort((a, b) =>
-        new Date(b.gameDate || b.date || 0) - new Date(a.gameDate || a.date || 0)
-      );
+      const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.name || ''))
+               || d.seasonTypes[0];   // if only one entry, use it regardless of name
+      games = (reg?.events || []).slice().reverse();
     } else if (d.events) {
       const evts = Array.isArray(d.events) ? d.events : Object.values(d.events);
       games = evts.slice().sort((a, b) =>
@@ -537,16 +529,9 @@ async function fetchPtsRolling(playerId) {
       return sl.length ? (sl.reduce((sum, e) => sum + getPts(e), 0) / sl.length).toFixed(2) : '—';
     };
 
-    // Season totals sit in the seasonType entry parallel to the labels array
-    const regTotals = reg?.totals || reg?.summary || reg?.stats;
-    const seasonShots = (Array.isArray(regTotals) && shotsIdx >= 0)
-      ? (+regTotals[shotsIdx] || null)
-      : null;
-
     ptsRollingCache[playerId] = {
-      lastPts:    games.slice(0, 3).map(getPts),
-      lastShots:  games.slice(0, 5).map(getShots),
-      seasonShots,
+      lastPts:   games.slice(0, 3).map(getPts),
+      lastShots: games.slice(0, 5).map(getShots),
       l7: avg(7), l15: avg(15), l30: avg(30),
     };
     return ptsRollingCache[playerId];
@@ -1008,13 +993,12 @@ function showShotsTooltip(el, playerId) {
 
   const sGP  = +stats.sGP  || 0;
   const cGP  = +stats.cGP  || 0;
-  // Prefer season shots from gamelog totals (more reliable); fall back to sports.core
-  const sSOG = recent?.seasonShots ?? +stats.sSOG ?? 0;
+  const sSOG = +stats.sSOG || 0;
   const cSOG = +stats.cSOG || 0;
 
-  // Shots per game — only compute when we have real data; career SOG often unavailable
-  const sSpG = (sGP > 0 && sSOG > 0) ? (sSOG / sGP).toFixed(1) : '—';
-  const cSpG = (cGP > 0 && cSOG > 0) ? (cSOG / cGP).toFixed(1) : '—';
+  // Shots per game as fraction: season / career
+  const sSpG = sGP > 0 ? (sSOG / sGP).toFixed(1) : '—';
+  const cSpG = cGP > 0 ? (cSOG / cGP).toFixed(1) : '—';
 
   // Last 5 game shots as hit-style boxes
   const shotsHtml = (recent && !recent.failed && recent.lastShots?.length)
@@ -1281,19 +1265,9 @@ async function runDiagnostics() {
     log(`   ✓ keys: [${Object.keys(d).join(', ')}]`, 'diag-ok');
     if (d.labels || d.names) log(`   labels/names: [${(d.labels || d.names || []).slice(0,8).join(', ')}]`, 'diag-ok');
     if (d.seasonTypes?.length) {
-      const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.name || '')) || d.seasonTypes[0];
-      const evtsRaw = reg?.events;
-      const evtCount = Array.isArray(evtsRaw) ? evtsRaw.length : (evtsRaw ? Object.keys(evtsRaw).length : 0);
-      log(`   seasonTypes: ${d.seasonTypes.length}  →  events: ${evtCount}`, 'diag-ok');
-      log(`   seasonTypes[0] keys: [${Object.keys(reg || {}).join(', ')}]`);
-      // Show whichever totals field exists
-      const tot = reg?.totals || reg?.summary || reg?.stats;
-      log(`   totals/summary/stats: ${tot ? JSON.stringify(tot).slice(0, 120) : 'none'}`,
-        tot ? 'diag-ok' : 'diag-warn');
-      // Show first event keys
-      const firstEvt = Array.isArray(evtsRaw) ? evtsRaw[0] : (evtsRaw ? Object.values(evtsRaw)[0] : null);
-      if (firstEvt) log(`   event[0] keys: [${Object.keys(firstEvt).join(', ')}]`);
-      if (firstEvt?.stats) log(`   event[0].stats: [${JSON.stringify(firstEvt.stats).slice(0,80)}]`);
+      const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.name || ''));
+      log(`   seasonTypes: ${d.seasonTypes.length}${reg ? `  →  regular events: ${(reg.events||[]).length}` : ''}`, 'diag-ok');
+      if (reg?.events?.[0]) log(`   event[0] keys: [${Object.keys(reg.events[0]).join(', ')}]`);
     } else if (d.events) {
       const evts = Array.isArray(d.events) ? d.events : Object.values(d.events);
       log(`   events: ${evts.length}`, evts.length ? 'diag-ok' : 'diag-warn');
