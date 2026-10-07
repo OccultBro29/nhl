@@ -436,19 +436,18 @@ async function fetchPlayerStats(playerId) {
       for (const cat of (cats || [])) {
         for (const s of (cat.stats || [])) {
           const v = s.displayValue;
-          switch (s.name) {
-            case 'goals':           if (sG   == null || +sG   === 0) sG   = v; break;
-            case 'assists':         if (sA   == null || +sA   === 0) sA   = v; break;
-            case 'points':          if (sPTS == null || +sPTS === 0) sPTS = v; break;
-            case 'gamesPlayed':     if (sGP  == null || +sGP  === 0) sGP  = v; break;
-            case 'shots':
-            case 'shotsOnGoal':     if (sSOG == null || +sSOG === 0) sSOG = v; break;
-            case 'wins':                sW   = v; break;
-            case 'losses':              sL   = v; break;
-            case 'overtimeLosses':      sOTL = v; break;
-            case 'goalsAgainstAverage': sGAA = parseFloat(v).toFixed(2); break;
-            case 'savePctg':
-            case 'savePercentage':      sSVP = parseFloat(v).toFixed(3).replace('0.', '.'); break;
+          switch (s.name?.toLowerCase()) {
+            case 'goals':                                   if (sG   == null || +sG   === 0) sG   = v; break;
+            case 'assists':                                 if (sA   == null || +sA   === 0) sA   = v; break;
+            case 'points':                                  if (sPTS == null || +sPTS === 0) sPTS = v; break;
+            case 'games': case 'gamesplayed': case 'gp':   if (sGP  == null || +sGP  === 0) sGP  = v; break;
+            case 'shots': case 'shotsongoal': case 'sog':  if (sSOG == null || +sSOG === 0) sSOG = v; break;
+            case 'wins':                    sW   = v; break;
+            case 'losses':                  sL   = v; break;
+            case 'overtimelosses': case 'otlosses': case 'otl': sOTL = v; break;
+            case 'goalsagainstaverage': case 'gaa': sGAA = parseFloat(v).toFixed(2); break;
+            case 'savepctg': case 'savepercentage': case 'sv%': case 'svp':
+              sSVP = parseFloat(v).toFixed(3).replace('0.', '.'); break;
           }
         }
       }
