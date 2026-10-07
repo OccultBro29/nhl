@@ -388,8 +388,12 @@ async function fetchRoster(teamId) {
 // ── Goalie stats line text (shared by initial render + background update) ──
 function goalieStatsLine(stats) {
   if (!stats || stats.failed) return 'Loading…';
-  if (stats.isGoalie && stats.sW != null)
-    return `${stats.sW}-${stats.sL}-${stats.sOTL}, ${stats.sGAA} GAA, ${stats.sSVP} SV%`;
+  if (stats.isGoalie && stats.sW != null) {
+    const w   = Math.round(+stats.sW);
+    const l   = Math.round(+stats.sL);
+    const otl = Math.round(+stats.sOTL);
+    return `${w}-${l}-${otl}`;
+  }
   return stats.sGP != null ? `${stats.sGP} GP this season` : 'G';
 }
 
@@ -442,9 +446,12 @@ async function fetchPlayerStats(playerId) {
             case 'points':                                  if (sPTS == null || +sPTS === 0) sPTS = v; break;
             case 'games': case 'gamesplayed': case 'gp':   if (sGP  == null || +sGP  === 0) sGP  = v; break;
             case 'shots': case 'shotsongoal': case 'sog':  if (sSOG == null || +sSOG === 0) sSOG = v; break;
-            case 'wins':                    sW   = v; break;
-            case 'losses':                  sL   = v; break;
-            case 'overtimelosses': case 'otlosses': case 'otl': sOTL = v; break;
+            case 'wins':   case 'w':
+              if (sW   == null || +sW   === 0) sW   = v; break;
+            case 'losses': case 'l':
+              if (sL   == null || +sL   === 0) sL   = v; break;
+            case 'overtimelosses': case 'otlosses': case 'otl': case 'ot': case 'otloss':
+              if (sOTL == null || +sOTL === 0) sOTL = v; break;
             case 'goalsagainstaverage': case 'gaa': sGAA = parseFloat(v).toFixed(2); break;
             case 'savepctg': case 'savepercentage': case 'sv%': case 'svp':
               sSVP = parseFloat(v).toFixed(3).replace('0.', '.'); break;
@@ -765,7 +772,6 @@ function buildGameCard(game) {
     const stats = playerStatsCache[goalie.id];
     const name  = playerName(goalie);
     const num   = goalie.jersey ?? '—';
-    const hand  = goalie.hand?.type ? ` (${goalie.hand.type})` : '';
     const hsrc  = goalie.headshot?.href || ESPN_HS(goalie.id);
     const href  = playerLink(goalie);
     return `
@@ -775,7 +781,7 @@ function buildGameCard(game) {
           <div class="goalie-name">
             <a href="${href}" target="_blank"
               onmouseenter="fetchPlayerStats(${goalie.id}).then(()=>onStatsLoaded(this,${goalie.id},true))"
-              onmouseleave="hideTooltip()">#${num} ${name}<span style="font-size:10px;font-weight:600;opacity:0.7;">${hand}</span></a>
+              onmouseleave="hideTooltip()">#${num} ${name}</a>
           </div>
           <div class="goalie-stats-line" id="gs-${goalie.id}">${goalieStatsLine(stats)}</div>
         </div>
