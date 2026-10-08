@@ -525,15 +525,19 @@ async function fetchPtsRolling(playerId) {
       );
     }
 
+    // Each event entry may be: an object with .stats/.values array, OR the stats array itself
+    const getStats = e => Array.isArray(e) ? e : (e.stats || e.values || e.statistics || []);
+    console.log('[gamelog game[0]]', JSON.stringify(games[0]).slice(0, 200));
+
     const getPts = e => {
-      const s = e.stats || e.values || [];
+      const s = getStats(e);
       if (Array.isArray(s))
         return (goalsIdx >= 0 ? +s[goalsIdx] || 0 : 0) + (assistsIdx >= 0 ? +s[assistsIdx] || 0 : 0);
       return (+s.goals || +s.G || 0) + (+s.assists || +s.A || 0);
     };
 
     const getShots = e => {
-      const s = e.stats || e.values || [];
+      const s = getStats(e);
       if (Array.isArray(s)) return shotsIdx >= 0 ? +s[shotsIdx] || 0 : 0;
       return +s.shots || +s.shotsOnGoal || +s.shotsTotal || +s.SOG || +s.S || 0;
     };
