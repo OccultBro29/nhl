@@ -830,7 +830,7 @@ function buildGameCard(game) {
       return `<li class="roster-player">
         <span class="jersey-num">#${num}</span>
         <a class="player-name-link" href="${href}" target="_blank"
-          onmouseenter="fetchPlayerStats(${p.id}).then(()=>onStatsLoaded(this,${p.id},false))"
+          onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>onStatsLoaded(this,${p.id},false))"
           onmouseleave="hideTooltip()">${name}</a>
 
         ${fracs}
