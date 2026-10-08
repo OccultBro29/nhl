@@ -494,10 +494,21 @@ async function fetchPtsRolling(playerId) {
       `https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${playerId}/gamelog`
     );
     // common/v3 gamelog: events keyed by event ID, labels + values arrays
+    // ESPN may return d.labels (short: 'S') OR d.names (full: 'shotsOnGoal') — check both
     const labels     = d.labels  || d.names  || [];
+    const names      = d.names   || d.labels || [];
+    console.log('[gamelog labels]', labels.join(', '));
+    console.log('[gamelog names]',  names.join(', '));
     const goalsIdx   = labels.findIndex(l => l === 'G'  || /^goals?$/i.test(l));
     const assistsIdx = labels.findIndex(l => l === 'A'  || /^assists?$/i.test(l));
-    const shotsIdx   = labels.findIndex(l => l === 'S'  || /^shots?$/i.test(l));
+    // 'S' in labels OR 'shotsOnGoal' / 'SOG' / 'shots' in either array
+    const isShotsLabel = l => /^(S|SOG|shots?|shots?OnGoals?)$/i.test(l);
+    const shotsIdx = (() => {
+      const i = labels.findIndex(isShotsLabel);
+      if (i >= 0) return i;
+      // If labels[] are short codes, names[] may have the full name at the same index
+      return names.findIndex(isShotsLabel);
+    })();
 
     // Collect all game entries, most-recent first
     let games = [];
@@ -522,7 +533,7 @@ async function fetchPtsRolling(playerId) {
     const getShots = e => {
       const s = e.stats || e.values || [];
       if (Array.isArray(s)) return shotsIdx >= 0 ? +s[shotsIdx] || 0 : 0;
-      return +s.shots || +s.S || 0;
+      return +s.shots || +s.shotsOnGoal || +s.SOG || +s.S || 0;
     };
 
     const avg = n => {
