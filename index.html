@@ -430,7 +430,8 @@ async function fetchPlayerStats(playerId) {
           if (nm === 'goals')                         { if (tot != null) cG   = tot; if (sea != null) sG   = sea; }
           if (nm === 'assists')                       { if (tot != null) cA   = tot; if (sea != null) sA   = sea; }
           if (nm === 'points')                        { if (tot != null) cPTS = tot; if (sea != null) sPTS = sea; }
-          if (nm === 'shots' || nm === 'S')           { if (tot != null) cSOG = tot; if (sea != null) sSOG = sea; }
+          if (nm === 'shots' || nm === 'S' || nm === 'shotsOnGoal' || /^(sog|shotsongoal)$/i.test(nm))
+                                                      { if (tot != null) cSOG = tot; if (sea != null) sSOG = sea; }
         });
       }
     }
@@ -530,9 +531,12 @@ async function fetchPtsRolling(playerId) {
     };
 
     ptsRollingCache[playerId] = {
-      lastPts:   games.slice(0, 3).map(getPts),
-      lastShots: games.slice(0, 5).map(getShots),
+      lastPts:    games.slice(0, 3).map(getPts),
+      lastShots:  games.slice(0, 5).map(getShots),
       l7: avg(7), l15: avg(15), l30: avg(30),
+      // Regular-season totals from the gamelog (same source ESPN uses for the totals row)
+      seasonShots: games.reduce((sum, e) => sum + getShots(e), 0),
+      seasonGP:    games.length,
     };
     return ptsRollingCache[playerId];
   } catch(e) {
@@ -991,14 +995,20 @@ function showShotsTooltip(el, playerId) {
   const recent = ptsRollingCache[playerId];
   if (!stats) return;
 
-  const sGP  = +stats.sGP  || 0;
+  // Season shots/game — prefer gamelog totals (same source as ESPN's regular-season row)
+  // Career shots/game — from the common/v3 stats endpoint career totals
+  const sesShots = (recent && !recent.failed && recent.seasonGP > 0)
+    ? recent.seasonShots
+    : +stats.sSOG || 0;
+  const sesGP    = (recent && !recent.failed && recent.seasonGP > 0)
+    ? recent.seasonGP
+    : +stats.sGP || 0;
   const cGP  = +stats.cGP  || 0;
-  const sSOG = +stats.sSOG || 0;
   const cSOG = +stats.cSOG || 0;
 
   // Shots per game as fraction: season / career
-  const sSpG = sGP > 0 ? (sSOG / sGP).toFixed(1) : '—';
-  const cSpG = cGP > 0 ? (cSOG / cGP).toFixed(1) : '—';
+  const sSpG = sesGP > 0 ? (sesShots / sesGP).toFixed(1) : '—';
+  const cSpG = cGP  > 0 ? (cSOG    / cGP ).toFixed(1) : '—';
 
   // Last 5 game shots as hit-style boxes
   const shotsHtml = (recent && !recent.failed && recent.lastShots?.length)
