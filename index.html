@@ -936,7 +936,6 @@ function showTooltip(el, playerId, goalieMode) {
   const recent = ptsRollingCache[playerId];
   const dobStr = stats?.dob ? formatDOB(stats.dob) : '—';
   const sGP    = stats?.sGP  ?? '—';  const cGP  = stats?.cGP  ?? '—';
-  const sG     = stats?.sG   ?? '—';  const cG   = stats?.cG   ?? '—';
 
   const ptsHtml = (recent && !recent.failed && recent.lastPts?.length)
     ? `<span class="tooltip-hits">${recent.lastPts.map(p => `<span class="tooltip-hit">${p}</span>`).join('')}</span>`
@@ -953,12 +952,11 @@ function showTooltip(el, playerId, goalieMode) {
       (stats.sGAA ? `<span class="tooltip-frac"><span class="tn">${stats.sGAA}</span><span class="td">GAA</span></span>` : '') +
       (stats.sSVP ? `<span class="tooltip-frac"><span class="tn">${stats.sSVP}</span><span class="td">SV%</span></span>` : '');
   } else {
-    // Skater tooltip: DOB | season GP / career GP | last 3 game pts | season G / career G
+    // Skater tooltip: DOB | season GP / career GP | last 3 game pts
     tip.innerHTML =
       `<span class="tooltip-dob">${dobStr}</span>` +
       `<span class="tooltip-frac"><span class="tn">${sGP}</span><span class="td">${cGP}</span></span>` +
-      ptsHtml +
-      `<span class="tooltip-frac"><span class="tn">${sG}</span><span class="td">${cG}</span></span>`;
+      ptsHtml;
   }
 
   const rect = el.getBoundingClientRect();
