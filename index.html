@@ -430,7 +430,7 @@ async function fetchPlayerStats(playerId) {
           if (nm === 'goals')                         { if (tot != null) cG   = tot; if (sea != null) sG   = sea; }
           if (nm === 'assists')                       { if (tot != null) cA   = tot; if (sea != null) sA   = sea; }
           if (nm === 'points')                        { if (tot != null) cPTS = tot; if (sea != null) sPTS = sea; }
-          if (nm === 'shots' || nm === 'S' || nm === 'shotsOnGoal' || /^(sog|shotsongoal)$/i.test(nm))
+          if (nm === 'shots' || nm === 'S' || nm === 'shotsOnGoal' || nm === 'shotsTotal' || /^(sog|shotsongoal|shotstotal)$/i.test(nm))
                                                       { if (tot != null) cSOG = tot; if (sea != null) sSOG = sea; }
         });
       }
@@ -446,7 +446,8 @@ async function fetchPlayerStats(playerId) {
             case 'assists':                                 if (sA   == null || +sA   === 0) sA   = v; break;
             case 'points':                                  if (sPTS == null || +sPTS === 0) sPTS = v; break;
             case 'games': case 'gamesplayed': case 'gp':   if (sGP  == null || +sGP  === 0) sGP  = v; break;
-            case 'shots': case 'shotsongoal': case 'sog':  if (sSOG == null || +sSOG === 0) sSOG = v; break;
+            case 'shots': case 'shotsongoal': case 'sog': case 'shotstotal': case 'shotsontarget':
+              if (sSOG == null || +sSOG === 0) sSOG = v; break;
             case 'wins':   case 'w':
               if (sW   == null || +sW   === 0) sW   = v; break;
             case 'losses': case 'l':
@@ -502,7 +503,7 @@ async function fetchPtsRolling(playerId) {
     const goalsIdx   = labels.findIndex(l => l === 'G'  || /^goals?$/i.test(l));
     const assistsIdx = labels.findIndex(l => l === 'A'  || /^assists?$/i.test(l));
     // 'S' in labels OR 'shotsOnGoal' / 'SOG' / 'shots' in either array
-    const isShotsLabel = l => /^(S|SOG|shots?|shots?OnGoals?)$/i.test(l);
+    const isShotsLabel = l => /^(S|SOG|shots?|shots?Total|shots?OnGoals?)$/i.test(l);
     const shotsIdx = (() => {
       const i = labels.findIndex(isShotsLabel);
       if (i >= 0) return i;
@@ -511,14 +512,15 @@ async function fetchPtsRolling(playerId) {
     })();
 
     // Collect all game entries, most-recent first
+    // ESPN returns reg.events as either an Array or a plain object keyed by event ID
+    const toArray = v => Array.isArray(v) ? v : (v && typeof v === 'object' ? Object.values(v) : []);
     let games = [];
     if (d.seasonTypes?.length) {
       const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.name || ''))
                || d.seasonTypes[0];   // if only one entry, use it regardless of name
-      games = (reg?.events || []).slice().reverse();
+      games = toArray(reg?.events).slice().reverse();
     } else if (d.events) {
-      const evts = Array.isArray(d.events) ? d.events : Object.values(d.events);
-      games = evts.slice().sort((a, b) =>
+      games = toArray(d.events).sort((a, b) =>
         new Date(b.gameDate || b.date || 0) - new Date(a.gameDate || a.date || 0)
       );
     }
@@ -533,7 +535,7 @@ async function fetchPtsRolling(playerId) {
     const getShots = e => {
       const s = e.stats || e.values || [];
       if (Array.isArray(s)) return shotsIdx >= 0 ? +s[shotsIdx] || 0 : 0;
-      return +s.shots || +s.shotsOnGoal || +s.SOG || +s.S || 0;
+      return +s.shots || +s.shotsOnGoal || +s.shotsTotal || +s.SOG || +s.S || 0;
     };
 
     const avg = n => {
