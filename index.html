@@ -501,8 +501,19 @@ async function fetchPtsRolling(playerId) {
     console.log('[gamelog labels]', labels.join(', '));
     console.log('[gamelog names]',  names.join(', '));
     console.log('[gamelog top keys]', Object.keys(d).join(', '));
-    if (d.seasonTypes) console.log('[gamelog seasonTypes]',
-      d.seasonTypes.map(t => `"${t.type||t.displayName||t.name}" events=${t.events ? (Array.isArray(t.events) ? 'array('+t.events.length+')' : 'object('+Object.keys(t.events).length+')') : 'none'} categories=${t.categories?.length ?? 'none'}`).join(' | '));
+    if (d.seasonTypes) {
+      console.log('[gamelog seasonTypes]',
+        d.seasonTypes.map(t => `"${t.type||t.displayName||t.name}" events=${t.events ? (Array.isArray(t.events) ? 'array('+t.events.length+')' : 'object('+Object.keys(t.events).length+')') : 'none'} categories=${t.categories?.length ?? 'none'}`).join(' | '));
+      const reg = d.seasonTypes.find(t => /regular/i.test(t.type||t.displayName||t.name||'')) || d.seasonTypes[0];
+      if (reg?.categories?.length) {
+        reg.categories.forEach((cat, i) => {
+          const evts = cat.events;
+          const evtInfo = evts ? (Array.isArray(evts) ? `array(${evts.length})` : `object(${Object.keys(evts).length})`) : 'none';
+          const first = evts ? (Array.isArray(evts) ? evts[0] : Object.values(evts)[0]) : null;
+          console.log(`[gamelog cat[${i}]] name="${cat.name||cat.type}" events=${evtInfo} first=${JSON.stringify(first).slice(0,150)}`);
+        });
+      }
+    }
     const goalsIdx   = labels.findIndex(l => l === 'G'  || /^goals?$/i.test(l));
     const assistsIdx = labels.findIndex(l => l === 'A'  || /^assists?$/i.test(l));
     // 'S' in labels OR 'shotsOnGoal' / 'SOG' / 'shots' in either array
