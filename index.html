@@ -521,10 +521,17 @@ async function fetchPtsRolling(playerId) {
       if (reg?.categories?.length) {
         for (const cat of reg.categories) {
           const catEvents = toArray(cat?.events);
-          if (catEvents.length > 0) { games = catEvents.slice().reverse(); break; }
+          if (catEvents.length > 0) {
+            // Sort by eventId descending so games[0] = most recent
+            games = catEvents.slice().sort((a, b) => +(b.eventId || 0) - +(a.eventId || 0));
+            break;
+          }
         }
       }
-      if (!games.length) games = toArray(reg?.events).slice().reverse();
+      if (!games.length) {
+        // Sort by eventId descending as fallback
+        games = toArray(reg?.events).slice().sort((a, b) => +(b.eventId || 0) - +(a.eventId || 0));
+      }
     }
     // Note: d.events is game *metadata* (links, opponent), not player stats — don't use it
 
