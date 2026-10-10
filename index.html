@@ -519,12 +519,14 @@ async function fetchPtsRolling(playerId) {
     const toArray = v => Array.isArray(v) ? v : (v && typeof v === 'object' ? Object.values(v) : []);
     let games = [];
     if (d.seasonTypes?.length) {
-      const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.name || ''))
-               || d.seasonTypes[0];   // if only one entry, use it regardless of name
+      const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.displayName || t.name || ''))
+               || d.seasonTypes[0];
       games = toArray(reg?.events).slice().reverse();
-    } else if (d.events) {
+    }
+    // d.events at the top level is the actual game-by-game log (present even when seasonTypes exists)
+    if (!games.length && d.events) {
       games = toArray(d.events).sort((a, b) =>
-        new Date(b.gameDate || b.date || 0) - new Date(a.gameDate || a.date || 0)
+        new Date(b.gameDate || b.date || b.eventDate || 0) - new Date(a.gameDate || a.date || a.eventDate || 0)
       );
     }
 
