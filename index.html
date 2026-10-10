@@ -500,6 +500,9 @@ async function fetchPtsRolling(playerId) {
     const names      = d.names   || d.labels || [];
     console.log('[gamelog labels]', labels.join(', '));
     console.log('[gamelog names]',  names.join(', '));
+    console.log('[gamelog top keys]', Object.keys(d).join(', '));
+    if (d.seasonTypes) console.log('[gamelog seasonTypes]',
+      d.seasonTypes.map(t => `"${t.type||t.displayName||t.name}" events=${t.events ? (Array.isArray(t.events) ? 'array('+t.events.length+')' : 'object('+Object.keys(t.events).length+')') : 'none'} categories=${t.categories?.length ?? 'none'}`).join(' | '));
     const goalsIdx   = labels.findIndex(l => l === 'G'  || /^goals?$/i.test(l));
     const assistsIdx = labels.findIndex(l => l === 'A'  || /^assists?$/i.test(l));
     // 'S' in labels OR 'shotsOnGoal' / 'SOG' / 'shots' in either array
@@ -527,7 +530,7 @@ async function fetchPtsRolling(playerId) {
 
     // Each event entry may be: an object with .stats/.values array, OR the stats array itself
     const getStats = e => Array.isArray(e) ? e : (e.stats || e.values || e.statistics || []);
-    console.log('[gamelog game[0]]', JSON.stringify(games[0]).slice(0, 200));
+    console.log('[gamelog games.length]', games.length, '| game[0]:', games.length ? JSON.stringify(games[0]).slice(0, 200) : 'EMPTY');
 
     const getPts = e => {
       const s = getStats(e);
