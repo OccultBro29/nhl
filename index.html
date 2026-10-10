@@ -521,14 +521,16 @@ async function fetchPtsRolling(playerId) {
     if (d.seasonTypes?.length) {
       const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.displayName || t.name || ''))
                || d.seasonTypes[0];
-      games = toArray(reg?.events).slice().reverse();
+      // Per-game stats live in categories[x].events, not reg.events directly
+      if (reg?.categories?.length) {
+        for (const cat of reg.categories) {
+          const catEvents = toArray(cat?.events);
+          if (catEvents.length > 0) { games = catEvents.slice().reverse(); break; }
+        }
+      }
+      if (!games.length) games = toArray(reg?.events).slice().reverse();
     }
-    // d.events at the top level is the actual game-by-game log (present even when seasonTypes exists)
-    if (!games.length && d.events) {
-      games = toArray(d.events).sort((a, b) =>
-        new Date(b.gameDate || b.date || b.eventDate || 0) - new Date(a.gameDate || a.date || a.eventDate || 0)
-      );
-    }
+    // Note: d.events is game *metadata* (links, opponent), not player stats — don't use it
 
     // Each event entry may be: an object with .stats/.values array, OR the stats array itself
     const getStats = e => Array.isArray(e) ? e : (e.stats || e.values || e.statistics || []);
