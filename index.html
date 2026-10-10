@@ -532,7 +532,14 @@ async function fetchPtsRolling(playerId) {
 
     // Each event entry may be: an object with .stats/.values array, OR the stats array itself
     const getStats = e => Array.isArray(e) ? e : (e.stats || e.values || e.statistics || []);
-    console.log('[gamelog games.length]', games.length, '| game[0]:', games.length ? JSON.stringify(games[0]).slice(0, 200) : 'EMPTY');
+    if (games.length) {
+      const g0 = games[0];
+      console.log('[gamelog games.length]', games.length);
+      console.log('[gamelog game[0] type]', Array.isArray(g0) ? `array(${g0.length})` : typeof g0);
+      console.log('[gamelog game[0]]', JSON.stringify(g0).slice(0, 400));
+    } else {
+      console.log('[gamelog games.length] 0 EMPTY');
+    }
 
     const getPts = e => {
       const s = getStats(e);
