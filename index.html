@@ -1044,10 +1044,12 @@ function showShotsTooltip(el, playerId) {
     ? `<span class="tooltip-hits">${recent.lastShots.map(s => `<span class="tooltip-hit">${s}</span>`).join('')}</span>`
     : '';
 
-  tip.innerHTML =
-    `<span class="tooltip-frac"><span class="tn">${sSpG}</span><span class="td">${cSpG}</span></span>` +
-    `<span class="hat-sep">S/GP</span>` +
-    shotsHtml;
+  const fracHtml = sSpG === '—' ? '' :
+    cSpG !== '—'
+      ? `<span class="tooltip-frac"><span class="tn">${sSpG}</span><span class="td">${cSpG}</span></span><span class="hat-sep">S/GP</span>`
+      : `<span class="tooltip-frac"><span class="tn">${sSpG}</span><span class="td">S/GP</span></span>`;
+
+  tip.innerHTML = fracHtml + shotsHtml;
 
   tip.style.top  = '-9999px';
   tip.style.left = '-9999px';
