@@ -1037,7 +1037,7 @@ function showShotsTooltip(el, playerId) {
 
   // Shots per game as fraction: season / career
   const sSpG = sesGP > 0 ? (sesShots / sesGP).toFixed(1) : '—';
-  const cSpG = cGP  > 0 ? (cSOG    / cGP ).toFixed(1) : '—';
+  const cSpG = (cGP > 0 && cSOG > 0) ? (cSOG / cGP).toFixed(1) : '—';
 
   // Last 5 game shots as hit-style boxes
   const shotsHtml = (recent && !recent.failed && recent.lastShots?.length)
