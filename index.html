@@ -511,8 +511,19 @@ async function fetchPtsRolling(playerId) {
     })();
 
     // Collect all game entries, most-recent first
-    // ESPN returns reg.events as either an Array or a plain object keyed by event ID
-    const toArray = v => Array.isArray(v) ? v : (v && typeof v === 'object' ? Object.values(v) : []);
+    // ESPN keyed-object events: sort by the KEY (game ID) descending so games[0] = most recent.
+    // Values may be plain stats arrays or objects — either way, wrap them consistently.
+    const toArray = v => {
+      if (Array.isArray(v)) return v;
+      if (!v || typeof v !== 'object') return [];
+      return Object.entries(v)
+        .sort(([a], [b]) => +b - +a)   // descending by eventId key
+        .map(([id, val]) =>
+          Array.isArray(val)            ? { eventId: id, stats: val }     // raw array → wrap
+          : (val && typeof val === 'object') ? (val.eventId ? val : { eventId: id, ...val })
+          : { eventId: id, stats: [] }
+        );
+    };
     let games = [];
     if (d.seasonTypes?.length) {
       const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.displayName || t.name || ''))
@@ -521,17 +532,10 @@ async function fetchPtsRolling(playerId) {
       if (reg?.categories?.length) {
         for (const cat of reg.categories) {
           const catEvents = toArray(cat?.events);
-          if (catEvents.length > 0) {
-            // Sort by eventId descending so games[0] = most recent
-            games = catEvents.slice().sort((a, b) => +(b.eventId || 0) - +(a.eventId || 0));
-            break;
-          }
+          if (catEvents.length > 0) { games = catEvents; break; }
         }
       }
-      if (!games.length) {
-        // Sort by eventId descending as fallback
-        games = toArray(reg?.events).slice().sort((a, b) => +(b.eventId || 0) - +(a.eventId || 0));
-      }
+      if (!games.length) games = toArray(reg?.events);
     }
     // Note: d.events is game *metadata* (links, opponent), not player stats — don't use it
 
