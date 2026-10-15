@@ -491,9 +491,20 @@ async function fetchPtsRolling(playerId) {
   const cached = ptsRollingCache[playerId];
   if (cached && !cached.failed) return cached;
   try {
-    const d = await apiFetch(
-      `https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${playerId}/gamelog`
-    );
+    const now0 = new Date();
+    const seasonStartYear0 = (now0.getMonth() + 1) >= 10 ? now0.getFullYear() : now0.getFullYear() - 1;
+    const glBase = `https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${playerId}/gamelog`;
+
+    // Fetch current season + previous seasons in parallel for career totals
+    const prevSeasons = [seasonStartYear0 - 1, seasonStartYear0 - 2, seasonStartYear0 - 3];
+    const [currResult, ...prevResults] = await Promise.allSettled([
+      apiFetch(glBase),
+      ...prevSeasons.map(yr => apiFetch(`${glBase}?season=${yr}`)),
+    ]);
+    if (currResult.status !== 'fulfilled') throw new Error('gamelog fetch failed');
+    const d = currResult.value;
+    const prevData = prevResults.filter(r => r.status === 'fulfilled').map(r => r.value);
+
     // common/v3 gamelog: events keyed by event ID, labels + values arrays
     // ESPN may return d.labels (short: 'S') OR d.names (full: 'shotsOnGoal') — check both
     const labels     = d.labels  || d.names  || [];
@@ -525,8 +536,7 @@ async function fetchPtsRolling(playerId) {
         );
     };
     // Only use the current NHL season's regular season games
-    const now2 = new Date();
-    const seasonStartYear = (now2.getMonth() + 1) >= 10 ? now2.getFullYear() : now2.getFullYear() - 1;
+    const seasonStartYear = seasonStartYear0;
 
     let games = [];
     if (d.seasonTypes?.length) {
@@ -571,20 +581,24 @@ async function fetchPtsRolling(playerId) {
       return sl.length ? (sl.reduce((sum, e) => sum + getPts(e), 0) / sl.length).toFixed(2) : '—';
     };
 
-    // Career totals: sum shots + GP across ALL regular season types in the gamelog
+    // Career totals: sum shots + GP across ALL regular season types in current + previous gamelogs
     let careerShots = 0, careerGP = 0;
-    for (const st of (d.seasonTypes || [])) {
-      const stName = st.type || st.displayName || st.name || '';
-      if (!/regular/i.test(stName)) continue;
-      for (const cat of (st.categories || [])) {
-        const evts = toArray(cat?.events);
-        if (evts.length > 0) {
-          careerShots += evts.reduce((sum, e) => sum + getShots(e), 0);
-          careerGP    += evts.length;
-          break; // first category per season = full-season totals; skip splits
+    const sumRegularSeasons = src => {
+      for (const st of (src.seasonTypes || [])) {
+        const stName = st.type || st.displayName || st.name || '';
+        if (!/regular/i.test(stName)) continue;
+        for (const cat of (st.categories || [])) {
+          const evts = toArray(cat?.events);
+          if (evts.length > 0) {
+            careerShots += evts.reduce((sum, e) => sum + getShots(e), 0);
+            careerGP    += evts.length;
+            break; // first category per season = full-season totals; skip splits
+          }
         }
       }
-    }
+    };
+    sumRegularSeasons(d);
+    prevData.forEach(sumRegularSeasons);
 
     ptsRollingCache[playerId] = {
       lastPts:    games.slice(0, 3).map(getPts),
