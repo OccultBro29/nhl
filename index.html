@@ -887,9 +887,9 @@ function buildGameCard(game) {
       </span>`;
       return `<li class="roster-player">
         <span class="jersey-num">#${num}</span>
-        <a class="player-name-link" href="${href}" target="_blank"
+        <a class="player-name-link" href="${href}" target="_blank"><span
           onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>onStatsLoaded(this,${p.id},false))"
-          onmouseleave="hideTooltip()">${name}</a>
+          onmouseleave="hideTooltip()">${name}</span></a>
 
         ${fracs}
         <span class="player-pos">${pos}</span>
