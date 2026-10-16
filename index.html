@@ -498,7 +498,7 @@ async function fetchPtsRolling(playerId) {
     // Fetch current season + previous seasons in parallel for career totals
     const prevSeasons = [seasonStartYear0 - 1, seasonStartYear0 - 2, seasonStartYear0 - 3];
     const [currResult, ...prevResults] = await Promise.allSettled([
-      apiFetch(glBase),
+      apiFetch(`${glBase}?season=${seasonStartYear0}`),
       ...prevSeasons.map(yr => apiFetch(`${glBase}?season=${yr}`)),
     ]);
     if (currResult.status !== 'fulfilled') throw new Error('gamelog fetch failed');
