@@ -498,7 +498,7 @@ async function fetchPtsRolling(playerId) {
     // Fetch current season + previous seasons in parallel for career totals
     const prevSeasons = [seasonStartYear0 - 1, seasonStartYear0 - 2, seasonStartYear0 - 3];
     const [currResult, ...prevResults] = await Promise.allSettled([
-      apiFetch(`${glBase}?season=${seasonStartYear0}`),
+      apiFetch(glBase),
       ...prevSeasons.map(yr => apiFetch(`${glBase}?season=${yr}`)),
     ]);
     if (currResult.status !== 'fulfilled') throw new Error('gamelog fetch failed');
@@ -540,12 +540,13 @@ async function fetchPtsRolling(playerId) {
 
     let games = [];
     if (d.seasonTypes?.length) {
+      // Pick the regular season type whose year matches the current season;
+      // fall back to the first regular season in the list (most recent from ESPN's no-param endpoint)
       const reg = d.seasonTypes.find(t => {
         const name = t.type || t.displayName || t.name || '';
         return /regular/i.test(name) && name.includes(String(seasonStartYear));
-      });
+      }) || d.seasonTypes.find(t => /regular/i.test(t.type || t.displayName || t.name || ''));
       if (!reg) {
-        // Player hasn't played in the current season — return empty so no stale data shows
         ptsRollingCache[playerId] = { lastPts: [], lastShots: [], l7: 0, l15: 0, l30: 0, seasonShots: 0, seasonGP: 0 };
         return ptsRollingCache[playerId];
       }
@@ -581,8 +582,8 @@ async function fetchPtsRolling(playerId) {
       return sl.length ? (sl.reduce((sum, e) => sum + getPts(e), 0) / sl.length).toFixed(2) : '—';
     };
 
-    // Career totals: sum shots + GP across ALL regular season types in current + previous gamelogs
-    let careerShots = 0, careerGP = 0;
+    // Career totals: sum shots + pts + GP across ALL regular season types in current + previous gamelogs
+    let careerShots = 0, careerPts = 0, careerGP = 0;
     const sumRegularSeasons = src => {
       for (const st of (src.seasonTypes || [])) {
         const stName = st.type || st.displayName || st.name || '';
@@ -591,6 +592,7 @@ async function fetchPtsRolling(playerId) {
           const evts = toArray(cat?.events);
           if (evts.length > 0) {
             careerShots += evts.reduce((sum, e) => sum + getShots(e), 0);
+            careerPts   += evts.reduce((sum, e) => sum + getPts(e),   0);
             careerGP    += evts.length;
             break; // first category per season = full-season totals; skip splits
           }
@@ -605,8 +607,10 @@ async function fetchPtsRolling(playerId) {
       lastShots:  games.slice(0, 5).map(getShots),
       l7: avg(7), l15: avg(15), l30: avg(30),
       seasonShots: games.reduce((sum, e) => sum + getShots(e), 0),
+      seasonPts:   games.reduce((sum, e) => sum + getPts(e),   0),
       seasonGP:    games.length,
       careerShots,
+      careerPts,
       careerGP,
     };
     return ptsRollingCache[playerId];
@@ -1032,16 +1036,19 @@ function hideTooltip() {
 // ── PTS rolling tooltip (on PTS fraction hover) ───────────────────
 function showPtsRolling(el, playerId) {
   const tip    = document.getElementById('pts-rolling-tooltip');
-  const stats  = playerStatsCache[playerId];
   const recent = ptsRollingCache[playerId];
   if (!recent || recent.failed) return;
 
-  const sPTS = stats?.sPTS ?? '—';
-  const cPTS = stats?.cPTS ?? '—';
+  // Season PPG and career PPG from gamelog totals
+  const sPPG = recent.seasonGP  > 0 ? (recent.seasonPts  / recent.seasonGP ).toFixed(2) : '—';
+  const cPPG = recent.careerGP  > 0 ? (recent.careerPts  / recent.careerGP ).toFixed(2) : '—';
 
-  tip.innerHTML =
-    `<span class="tooltip-frac"><span class="tn">${sPTS}</span><span class="td">${cPTS}</span></span>` +
-    `<span class="hat-sep">|</span>` +
+  const fracHtml = sPPG === '—' ? '' :
+    cPPG !== '—'
+      ? `<span class="tooltip-frac"><span class="tn">${sPPG}</span><span class="td">${cPPG}</span></span><span class="hat-sep">PPG</span>`
+      : `<span class="tooltip-frac"><span class="tn">${sPPG}</span><span class="td">PPG</span></span>`;
+
+  tip.innerHTML = fracHtml +
     `<span class="hat-recent">${recent.l7} / ${recent.l15} / ${recent.l30}</span>`;
 
   tip.style.top  = '-9999px';
