@@ -171,18 +171,7 @@
   .tbd-roster { color: var(--text-light); font-style: italic; font-size: 12px; padding: 8px 0; text-align: center; }
 
   /* ── Diagnostics panel ── */
-  .diag-btn { font-size: 12px; padding: 7px 12px; border: 1px dashed var(--border); border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; font-family: inherit; }
-  .diag-btn:hover { background: #ece6da; }
-  #diag-panel { display: none; position: fixed; bottom: 20px; right: 20px; width: 560px; max-height: 72vh; overflow-y: auto; background: #1a1a2e; color: #e2e8f0; border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.45); z-index: 9998; font-family: monospace; font-size: 11px; }
-  #diag-panel.open { display: block; }
-  #diag-header { padding: 10px 14px; background: rgba(255,255,255,0.07); display: flex; justify-content: space-between; align-items: center; border-radius: 10px 10px 0 0; position: sticky; top: 0; }
-  #diag-header span { font-weight: 700; font-size: 12px; }
-  #diag-close { background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 18px; line-height: 1; }
-  #diag-body { padding: 14px; white-space: pre-wrap; line-height: 1.6; }
-  .diag-ok   { color: #4ade80; }
-  .diag-err  { color: #f87171; }
-  .diag-warn { color: #fbbf24; }
-  .diag-key  { color: #93c5fd; }
+
 </style>
 </head>
 <body>
@@ -217,7 +206,7 @@
         </svg>
         Refresh Rosters
       </button>
-      <button class="diag-btn" onclick="runDiagnostics()">🔬 Test ESPN API</button>
+
     </div>
   </div>
 
@@ -360,7 +349,7 @@ async function fetchRoster(teamId) {
       });
     }
 
-    console.log(`[roster ${teamId}] groups=${arr.length} hasGroups=${hasGroups} F=${forwards.length} D=${defensemen.length} G=${goalies.length}`);
+
 
     // Pre-seed DOB + isGoalie so the tooltip has context before the stats hover
     const seedPlayer = (p, isGoalie) => {
@@ -465,8 +454,6 @@ async function fetchPlayerStats(playerId) {
     if (coreRes.status === 'fulfilled')
       parseCoreStats(coreRes.value?.splits?.categories);
 
-
-
     const result = {
       dob:      existingDob,
       isGoalie: existingIsGoalie,
@@ -508,7 +495,6 @@ async function fetchPtsRolling(playerId) {
     // common/v3 gamelog: events keyed by event ID, labels + values arrays
     // ESPN may return d.labels (short: 'S') OR d.names (full: 'shotsOnGoal') — check both
     const labels     = d.labels  || d.names  || [];
-    const names      = d.names   || d.labels || [];
 
     const goalsIdx   = labels.findIndex(l => l === 'G'  || /^goals?$/i.test(l));
     const assistsIdx = labels.findIndex(l => l === 'A'  || /^assists?$/i.test(l));
@@ -1177,197 +1163,8 @@ function renderCalendar() {
     <div class="cal-grid">${dowHtml}${dayHtml}</div>`;
 }
 
-// ── Diagnostics ───────────────────────────────────────────────────
-async function runDiagnostics() {
-  const panel = document.getElementById('diag-panel');
-  const body  = document.getElementById('diag-body');
-  panel.classList.add('open');
-  body.innerHTML = 'Running diagnostics…\n\n';
 
-  const log = (msg, cls) => {
-    body.innerHTML += cls ? `<span class="${cls}">${escHtml(msg)}</span>\n` : escHtml(msg) + '\n';
-    panel.scrollTop = panel.scrollHeight;
-  };
-  const escHtml = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-  // Pick team + player from whatever's already loaded, or fall back to known IDs
-  const firstGame  = allGames[0];
-  const testTeamId = firstGame?.homeTeam?.id   || '1';        // ESPN team ID (Bruins = 1)
-  const testAbbr   = firstGame?.homeTeam?.abbrev || 'BOS';    // NHL abbrev for roster endpoint
-
-  // Try to find an ESPN player ID from any cached roster
-  let testPlayerId = null;
-  for (const abbr of Object.keys(rosterCache)) {
-    const r = rosterCache[abbr];
-    const p = [...(r.forwards||[]), ...(r.defensemen||[]), ...(r.goalies||[])][0];
-    if (p?.id) { testPlayerId = String(p.id); break; }
-  }
-
-  const now   = new Date();
-  const yr    = now.getFullYear();
-  const seasonYear = now.getMonth() >= 9 ? yr : yr - 1; // Oct+ starts new season
-  // Use Miro Heiskanen as known-good fallback (id 4233536)
-  if (!testPlayerId) testPlayerId = '4233536';
-  const ESPN_CORE = ESPN_CORE_NHL;
-
-  log(`Team: ${testAbbr} (ESPN id ${testTeamId})  |  Season: ${seasonYear}-${seasonYear+1}`);
-  if (testPlayerId) log(`Player id: ${testPlayerId} (first from cached roster)`);
-  else              log('No player id — load games first to test player stat endpoints', 'diag-warn');
-
-  // ── 1. ESPN roster — direct ──────────────────────────────────────
-  log(`\n── ESPN roster  (direct fetch) ──`);
-  const rosterUrl = `${ESPN_NHL}/teams/${testTeamId}/roster`;
-  log(`   ${rosterUrl}`, 'diag-key');
-  try {
-    const d = await apiFetch(rosterUrl);
-    log(`   ✓ top-level keys: [${Object.keys(d).join(', ')}]`, 'diag-ok');
-    const arr = d.athletes || d.roster;
-    if (Array.isArray(arr)) {
-      log(`   athletes: array, length=${arr.length}`, arr.length ? 'diag-ok' : 'diag-err');
-      if (arr[0]) {
-        const g0 = arr[0];
-        log(`   [0] keys: [${Object.keys(g0).join(', ')}]`);
-        log(`   [0].position: ${JSON.stringify(g0.position)}`);
-        log(`   [0].items?.length: ${g0.items?.length ?? 'undefined'}`);
-        log(`   [0].athletes?.length: ${g0.athletes?.length ?? 'undefined'}`);
-        if (g0.id || g0.fullName) {
-          log(`   → flat format — first player: ${g0.fullName || g0.id}`, 'diag-warn');
-          testPlayerId = testPlayerId || String(g0.id);
-        }
-      }
-    } else {
-      log(`   athletes: ${typeof arr} (not array)`, 'diag-err');
-      if (d.athletes !== undefined) log(`   raw: ${JSON.stringify(d.athletes).slice(0, 200)}`, 'diag-warn');
-    }
-  } catch(e) { log(`   ✗ ${e.message}`, 'diag-err'); }
-
-  // ── 2. ESPN roster — ?enable=roster ─────────────────────────────
-  log(`\n── ESPN ?enable=roster ──`);
-  const enableUrl = `${ESPN_NHL}/teams/${testTeamId}?enable=roster`;
-  log(`   ${enableUrl}`, 'diag-key');
-  try {
-    const d = await apiFetch(enableUrl);
-    log(`   ✓ top-level keys: [${Object.keys(d).join(', ')}]`, 'diag-ok');
-    if (d.team) {
-      log(`   team keys: [${Object.keys(d.team).join(', ')}]`);
-      const r = d.team.roster || d.team.athletes;
-      if (r) {
-        const entries = r.entries || r;
-        log(`   roster entries: ${Array.isArray(entries) ? entries.length : typeof entries}`,
-          Array.isArray(entries) && entries.length ? 'diag-ok' : 'diag-warn');
-        if (Array.isArray(entries) && entries[0]) {
-          const first = entries[0].athlete || entries[0];
-          log(`   first player: ${first.fullName || first.id}`);
-          testPlayerId = testPlayerId || String(first.id || '');
-        }
-      } else {
-        log(`   no roster/athletes key under team`, 'diag-warn');
-      }
-    }
-  } catch(e) { log(`   ✗ ${e.message}`, 'diag-err'); }
-
-  // ── 3. Roster cache contents ──────────────────────────────────────
-  log(`\n── Roster cache (loaded teams) ──`);
-  const cachedTeams = Object.keys(rosterCache);
-  if (!cachedTeams.length) {
-    log(`   empty — load games first`, 'diag-warn');
-  } else {
-    cachedTeams.forEach(id => {
-      const r = rosterCache[id];
-      const status = r.failed ? '✗ failed' : `✓ F=${r.forwards.length} D=${r.defensemen.length} G=${r.goalies.length}`;
-      log(`   team ${id}: ${status}`, r.failed ? 'diag-err' : 'diag-ok');
-      // Grab player id if we haven't found one yet
-      if (!testPlayerId && !r.failed) {
-        const p = [...(r.forwards||[]), ...(r.defensemen||[]), ...(r.goalies||[])][0];
-        if (p?.id) testPlayerId = String(p.id);
-      }
-    });
-  }
-
-  if (!testPlayerId) {
-    log('\nNo player id — skipping stat endpoint tests.', 'diag-warn');
-    log('\nDone.');
-    return;
-  }
-
-  log(`\nPlayer id ${testPlayerId} — testing stat endpoints…`);
-
-  // ── 4. common/v3 stats ───────────────────────────────────────────
-  log(`\n── common/v3 /stats ──`);
-  const cv3Url = `https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${testPlayerId}/stats`;
-  log(`   ${cv3Url}`, 'diag-key');
-  try {
-    const d = await apiFetch(cv3Url);
-    log(`   ✓ keys: [${Object.keys(d).join(', ')}]`, 'diag-ok');
-    if (d.categories?.length) {
-      log(`   ${d.categories.length} categories:`);
-      d.categories.forEach(cat => {
-        const names = (cat.names || []).slice(0, 6).join(', ');
-        const tots  = (cat.totals || []).slice(0, 4).join(', ');
-        log(`     ${cat.name || cat.displayName}: names=[${names}]  totals=[${tots}]`);
-      });
-    } else { log(`   no categories`, 'diag-warn'); }
-  } catch(e) { log(`   ✗ ${e.message}`, 'diag-err'); }
-
-  // ── 5. sports.core season stats ──────────────────────────────────
-  log(`\n── sports.core season stats ──`);
-  const coreUrl = `${ESPN_CORE}/seasons/${seasonYear+1}/types/2/athletes/${testPlayerId}/statistics/0`;
-  log(`   ${coreUrl}`, 'diag-key');
-  try {
-    const d = await apiFetch(coreUrl);
-    log(`   ✓ keys: [${Object.keys(d).join(', ')}]`, 'diag-ok');
-    if (d.splits?.categories) {
-      const cats = d.splits.categories;
-      log(`   ${cats.length} split categories: [${cats.map(c => c.name).join(', ')}]`, 'diag-ok');
-      const sample = cats.flatMap(c => c.stats || []).slice(0, 5);
-      log(`   sample: ${sample.map(s => `${s.name}=${s.displayValue}`).join('  ')}`);
-    } else { log(`   no splits.categories`, 'diag-warn'); }
-  } catch(e) { log(`   ✗ ${e.message}`, 'diag-err'); }
-
-  // ── 6. statisticslog ─────────────────────────────────────────────
-  log(`\n── statisticslog ──`);
-  const logUrl = `${ESPN_CORE}/athletes/${testPlayerId}/statisticslog`;
-  log(`   ${logUrl}`, 'diag-key');
-  try {
-    const d = await apiFetch(logUrl);
-    log(`   ✓ keys: [${Object.keys(d).join(', ')}]`, 'diag-ok');
-    const entries = d.entries || d.items || [];
-    log(`   entries: ${entries.length}`, entries.length ? 'diag-ok' : 'diag-warn');
-    if (entries[0]) log(`   first $ref: ${entries[0].$ref || 'none'}`);
-  } catch(e) { log(`   ✗ ${e.message}`, 'diag-err'); }
-
-  // ── 7. Gamelog — site/v2 (known to fail, baseline) ──────────────
-  log(`\n── gamelog: site/v2 (expected to fail) ──`);
-  const glV2Url = `${ESPN_NHL}/athletes/${testPlayerId}/gamelog`;
-  log(`   ${glV2Url}`, 'diag-key');
-  try {
-    const d = await apiFetch(glV2Url);
-    log(`   ✓ keys: [${Object.keys(d).join(', ')}]`, 'diag-ok');
-  } catch(e) { log(`   ✗ ${e.message}`, 'diag-err'); }
-
-  // ── 8. Gamelog — common/v3 (the NFL file pattern) ────────────────
-  log(`\n── gamelog: common/v3 ──`);
-  const glV3Url = `https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${testPlayerId}/gamelog`;
-  log(`   ${glV3Url}`, 'diag-key');
-  try {
-    const d = await apiFetch(glV3Url);
-    log(`   ✓ keys: [${Object.keys(d).join(', ')}]`, 'diag-ok');
-    if (d.labels || d.names) log(`   labels/names: [${(d.labels || d.names || []).slice(0,8).join(', ')}]`, 'diag-ok');
-    if (d.seasonTypes?.length) {
-      const reg = d.seasonTypes.find(t => /regular/i.test(t.type || t.name || ''));
-      log(`   seasonTypes: ${d.seasonTypes.length}${reg ? `  →  regular events: ${(reg.events||[]).length}` : ''}`, 'diag-ok');
-      if (reg?.events?.[0]) log(`   event[0] keys: [${Object.keys(reg.events[0]).join(', ')}]`);
-    } else if (d.events) {
-      const evts = Array.isArray(d.events) ? d.events : Object.values(d.events);
-      log(`   events: ${evts.length}`, evts.length ? 'diag-ok' : 'diag-warn');
-      if (evts[0]) log(`   event[0] keys: [${Object.keys(evts[0]).join(', ')}]`);
-    } else {
-      log(`   no events/seasonTypes found`, 'diag-warn');
-    }
-  } catch(e) { log(`   ✗ ${e.message}`, 'diag-err'); }
-
-  log('\nDone.');
-}
 </script>
 
 <div class="calendar-dropdown" id="calendar-dropdown"></div>
@@ -1375,12 +1172,5 @@ async function runDiagnostics() {
 <div class="hit-avg-tooltip" id="pts-rolling-tooltip"></div>
 <div class="hit-avg-tooltip" id="shots-avg-tooltip"></div>
 
-<div id="diag-panel">
-  <div id="diag-header">
-    <span>🔬 ESPN NHL API Diagnostics</span>
-    <button id="diag-close" onclick="document.getElementById('diag-panel').classList.remove('open')">✕</button>
-  </div>
-  <div id="diag-body"></div>
-</div>
 </body>
 </html>
