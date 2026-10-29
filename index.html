@@ -552,6 +552,16 @@ async function fetchPtsRolling(playerId) {
 
     const gamesA = extractGames(d);
     const gamesB = extractGames(dSeason);
+    console.log(`[gamelog] no-param=${gamesA.length} season-param=${gamesB.length}`);
+    if (dSeason) {
+      console.log('[?season keys]', Object.keys(dSeason).join(', '));
+      if (dSeason.seasonTypes) console.log('[?season seasonTypes]',
+        dSeason.seasonTypes.map(t => `"${t.type||t.displayName||t.name}" cats=${t.categories?.length??'none'} evts=${t.events?(Array.isArray(t.events)?'arr('+t.events.length+')':'obj('+Object.keys(t.events).length+')'):'none'}`).join(' | '));
+      if (dSeason.events) {
+        const firstEvt = Array.isArray(dSeason.events) ? dSeason.events[0] : Object.values(dSeason.events)[0];
+        console.log('[?season d.events]', Array.isArray(dSeason.events) ? `array(${dSeason.events.length})` : `object(${Object.keys(dSeason.events).length})`, 'first=', JSON.stringify(firstEvt).slice(0,200));
+      }
+    }
     // Use whichever gives a fuller picture of the current season
     let games = gamesA.length >= gamesB.length ? gamesA : gamesB;
     if (!games.length) {
