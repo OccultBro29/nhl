@@ -483,10 +483,12 @@ async function fetchPtsRolling(playerId) {
     const glBase = `https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${playerId}/gamelog`;
 
     // Fetch current season + previous seasons in parallel for career totals
-    const prevSeasons = [seasonStartYear0 - 1, seasonStartYear0 - 2, seasonStartYear0 - 3];
+    // ESPN season param uses the END year of the season (2026-27 = ?season=2027)
+    const espnSeason = seasonStartYear0 + 1;
+    const prevSeasons = [espnSeason - 1, espnSeason - 2, espnSeason - 3]; // 2025-26, 2024-25, 2023-24
     const [currResult, currSeasonResult, ...prevResults] = await Promise.allSettled([
       apiFetch(glBase),
-      apiFetch(`${glBase}?season=${seasonStartYear0}`),
+      apiFetch(`${glBase}?season=${espnSeason}`),
       ...prevSeasons.map(yr => apiFetch(`${glBase}?season=${yr}`)),
     ]);
     if (currResult.status !== 'fulfilled') throw new Error('gamelog fetch failed');
@@ -552,16 +554,7 @@ async function fetchPtsRolling(playerId) {
 
     const gamesA = extractGames(d);
     const gamesB = extractGames(dSeason);
-    console.log(`[gamelog] no-param=${gamesA.length} season-param=${gamesB.length}`);
-    if (dSeason) {
-      console.log('[?season keys]', Object.keys(dSeason).join(', '));
-      if (dSeason.seasonTypes) console.log('[?season seasonTypes]',
-        dSeason.seasonTypes.map(t => `"${t.type||t.displayName||t.name}" cats=${t.categories?.length??'none'} evts=${t.events?(Array.isArray(t.events)?'arr('+t.events.length+')':'obj('+Object.keys(t.events).length+')'):'none'}`).join(' | '));
-      if (dSeason.events) {
-        const firstEvt = Array.isArray(dSeason.events) ? dSeason.events[0] : Object.values(dSeason.events)[0];
-        console.log('[?season d.events]', Array.isArray(dSeason.events) ? `array(${dSeason.events.length})` : `object(${Object.keys(dSeason.events).length})`, 'first=', JSON.stringify(firstEvt).slice(0,200));
-      }
-    }
+
     // Use whichever gives a fuller picture of the current season
     let games = gamesA.length >= gamesB.length ? gamesA : gamesB;
     if (!games.length) {
