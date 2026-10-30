@@ -483,30 +483,28 @@ async function fetchPtsRolling(playerId) {
     const glBase = `https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${playerId}/gamelog`;
 
     // Fetch current season + previous seasons in parallel for career totals
-    // ESPN season param uses the END year of the season (2026-27 = ?season=2027)
-    const espnSeason = seasonStartYear0 + 1;
-    const prevSeasons = [espnSeason - 1, espnSeason - 2, espnSeason - 3]; // 2025-26, 2024-25, 2023-24
-    const [currResult, currSeasonResult, ...prevResults] = await Promise.allSettled([
+    const prevSeasons = [seasonStartYear0 - 1, seasonStartYear0 - 2, seasonStartYear0 - 3];
+    const [currResult, ...prevResults] = await Promise.allSettled([
       apiFetch(glBase),
-      apiFetch(`${glBase}?season=${espnSeason}`),
       ...prevSeasons.map(yr => apiFetch(`${glBase}?season=${yr}`)),
     ]);
     if (currResult.status !== 'fulfilled') throw new Error('gamelog fetch failed');
     const d = currResult.value;
-    const dSeason = currSeasonResult.status === 'fulfilled' ? currSeasonResult.value : null;
     const prevData = prevResults.filter(r => r.status === 'fulfilled').map(r => r.value);
 
     // common/v3 gamelog: events keyed by event ID, labels + values arrays
     // ESPN may return d.labels (short: 'S') OR d.names (full: 'shotsOnGoal') — check both
-    const labels = d.labels || d.names || [];
-    const names  = d.names  || d.labels || [];
+    const labels     = d.labels  || d.names  || [];
 
     const goalsIdx   = labels.findIndex(l => l === 'G'  || /^goals?$/i.test(l));
     const assistsIdx = labels.findIndex(l => l === 'A'  || /^assists?$/i.test(l));
+    // 'S' in labels OR 'shotsOnGoal' / 'SOG' / 'shots' in either array
     const isShotsLabel = l => /^(S|SOG|shots?|shots?Total|shots?OnGoals?)$/i.test(l);
     const shotsIdx = (() => {
       const i = labels.findIndex(isShotsLabel);
-      return i >= 0 ? i : names.findIndex(isShotsLabel);
+      if (i >= 0) return i;
+      // If labels[] are short codes, names[] may have the full name at the same index
+      return names.findIndex(isShotsLabel);
     })();
 
     // Collect all game entries, most-recent first
@@ -526,41 +524,27 @@ async function fetchPtsRolling(playerId) {
     // Only use the current NHL season's regular season games
     const seasonStartYear = seasonStartYear0;
 
-    // Extract games from a gamelog response — tries categories first, then direct events,
-    // then d.events (only if values look like stats, not metadata)
-    const extractGames = src => {
-      if (!src) return [];
-      const stYear = String(seasonStartYear);
-      const reg = (src.seasonTypes || []).find(t => {
-        const n = t.type || t.displayName || t.name || '';
-        return /regular/i.test(n) && n.includes(stYear);
-      }) || (src.seasonTypes || []).find(t => /regular/i.test(t.type || t.displayName || t.name || ''));
-      let evts = [];
+    let games = [];
+    if (d.seasonTypes?.length) {
+      // Pick the regular season type whose year matches the current season;
+      // fall back to the first regular season in the list (most recent from ESPN's no-param endpoint)
+      const reg = d.seasonTypes.find(t => {
+        const name = t.type || t.displayName || t.name || '';
+        return /regular/i.test(name) && name.includes(String(seasonStartYear));
+      }) || d.seasonTypes.find(t => /regular/i.test(t.type || t.displayName || t.name || ''));
+      if (!reg) {
+        ptsRollingCache[playerId] = { lastPts: [], lastShots: [], l7: 0, l15: 0, l30: 0, seasonShots: 0, seasonGP: 0 };
+        return ptsRollingCache[playerId];
+      }
       if (reg?.categories?.length) {
         for (const cat of reg.categories) {
-          const ce = toArray(cat?.events);
-          if (ce.length > 0) { evts = ce; break; }
+          const catEvents = toArray(cat?.events);
+          if (catEvents.length > 0) { games = catEvents; break; }
         }
       }
-      if (!evts.length && reg?.events) evts = toArray(reg.events);
-      // d.events: with ?season= param ESPN puts stats here; without it, it's metadata (has .links)
-      if (!evts.length && src.events) {
-        const candidate = toArray(src.events);
-        const first = candidate[0];
-        if (first && first.stats && Array.isArray(first.stats) && !first.links) evts = candidate;
-      }
-      return evts;
-    };
-
-    const gamesA = extractGames(d);
-    const gamesB = extractGames(dSeason);
-
-    // Use whichever gives a fuller picture of the current season
-    let games = gamesA.length >= gamesB.length ? gamesA : gamesB;
-    if (!games.length) {
-      ptsRollingCache[playerId] = { lastPts: [], lastShots: [], l7: 0, l15: 0, l30: 0, seasonShots: 0, seasonPts: 0, seasonGP: 0, careerShots: 0, careerPts: 0, careerGP: 0 };
-      return ptsRollingCache[playerId];
+      if (!games.length) games = toArray(reg?.events);
     }
+    // Note: d.events is game *metadata* (links, opponent), not player stats — don't use it
 
     // Each event entry may be: an object with .stats/.values array, OR the stats array itself
     const getStats = e => Array.isArray(e) ? e : (e.stats || e.values || e.statistics || []);
