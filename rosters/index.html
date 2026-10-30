@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NHL Game Day Rosters</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --navy: #0b5d4b;
+    --red: #d50032;
+    --bg: #f5efe3;
+    --surface: #f5efe3;
+    --border: rgba(11,93,75,0.18);
+    --text: #1a1a2e;
+    --text-muted: #6b7280;
+    --text-light: #9ca3af;
+    --accent: #0b5d4b;
+    --number-color: #3b214a;
+  }
+
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  header { background: #0b5d4b; color: white; padding: 0; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+  .header-inner { max-width: 1200px; margin: 0 auto; padding: 21px 16px; display: flex; align-items: center; gap: 16px; }
+
+  .page-container { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+
+  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+  .page-title { font-size: 28px; font-weight: 800; color: var(--navy); letter-spacing: -0.5px; }
+  .date-badge { font-size: 14px; color: #3b214a; font-weight: 500; margin-top: 3px; }
+
+  /* ── Date navigator ── */
+  .date-nav { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; border: 1.5px solid var(--border); border-radius: 8px; overflow: visible; background: #f5efe3; box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+  .date-nav-btn { background: none; border: none; padding: 10px 14px; cursor: pointer; color: var(--navy); display: flex; align-items: center; justify-content: center; transition: background 0.15s; flex-shrink: 0; }
+  .date-nav-btn:hover { background: #ece6da; }
+  .date-nav-btn:active { background: #ddd6f0; }
+  .date-nav-label { padding: 10px 18px; font-size: 15px; font-weight: 700; color: #3b214a; border-left: 1.5px solid var(--border); border-right: 1.5px solid var(--border); width: 280px; text-align: center; white-space: nowrap; cursor: pointer; user-select: none; transition: background 0.15s; }
+  .date-nav-label:hover { background: #ece6da; }
+
+  /* ── Pts/game rolling tooltip (mirrors hit-avg-tooltip) ── */
+  .hit-avg-tooltip { display: none; position: fixed; background: #3b214a; color: white; border-radius: 7px; padding: 4px 8px; font-size: 11px; font-weight: 500; white-space: nowrap; z-index: 9999; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,0.25); align-items: center; gap: 8px; }
+  .hit-avg-tooltip.visible { display: flex; }
+  .hat-sep { opacity: 0.85; font-size: 13px; margin: 0 2px; font-weight: 300; }
+  .hat-recent { opacity: 0.85; color: white; }
+
+  /* ── Calendar dropdown ── */
+  .calendar-dropdown { display: none; position: fixed; background: #f5efe3; border: 1.5px solid var(--border); border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.18); z-index: 9999; padding: 16px; width: 280px; }
+  .calendar-dropdown.open { display: block; }
+  .cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .cal-month-label { font-size: 15px; font-weight: 700; color: #3b214a; }
+  .cal-nav-btn { background: #f5efe3; border: none; cursor: pointer; color: #3b214a; padding: 4px 8px; border-radius: 6px; display: flex; align-items: center; transition: background 0.12s; }
+  .cal-nav-btn:hover { background: #ece6da; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .cal-dow { text-align: center; font-size: 11px; font-weight: 700; color: var(--text-light); padding: 4px 0 8px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .cal-day { text-align: center; padding: 7px 2px; font-size: 13px; font-weight: 500; border-radius: 6px; cursor: pointer; color: var(--text); transition: background 0.1s, color 0.1s; }
+  .cal-day:hover { background: #ece6da; color: var(--navy); }
+  .cal-day.today { border: 1.5px solid #3b214a; font-weight: 700; }
+  .cal-day.selected { background: #3b214a; color: white; font-weight: 700; }
+  .cal-day.selected:hover { background: #2e1a3a; }
+  .cal-day.empty { cursor: default; pointer-events: none; }
+
+  /* ── Controls ── */
+  .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .refresh-btn { display: inline-flex; align-items: center; gap: 8px; background: var(--navy); color: white; border: none; padding: 9px 18px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.15s, transform 0.1s; letter-spacing: 0.2px; }
+  .refresh-btn:hover { background: #084d3e; }
+  .refresh-btn:active { transform: scale(0.97); }
+  .refresh-btn.loading { opacity: 0.6; pointer-events: none; }
+  .refresh-btn.loading svg { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .status-bar { font-size: 12px; color: var(--text-muted); text-align: right; margin-bottom: 16px; }
+  .status-bar.error { color: #dc2626; }
+
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+
+  /* ── Multi-select dropdown ── */
+  .multi-select { position: relative; }
+  .multi-select-btn { font-size: 13px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 6px; background: #f5efe3; color: var(--text); cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .multi-select-btn:hover { background: #ece6da; }
+  .multi-select-arrow { font-size: 10px; opacity: 0.6; }
+  .multi-select-dropdown { display: none; position: absolute; top: calc(100% + 4px); left: 0; background: #f5efe3; border: 1.5px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.12); z-index: 500; min-width: 180px; max-height: 320px; overflow-y: auto; padding: 6px 0; }
+  .multi-select-dropdown.open { display: block; }
+  .multi-select-option { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--text); user-select: none; }
+  .multi-select-option:hover { background: #ece6da; }
+  .multi-select-option input[type="checkbox"] { accent-color: var(--navy); width: 13px; height: 13px; flex-shrink: 0; cursor: pointer; }
+  .multi-select-option.all-option { border-bottom: 1px solid var(--border); margin-bottom: 4px; padding-bottom: 8px; font-weight: 600; }
+
+  /* ── Games grid ── */
+  .games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(540px, 1fr)); gap: 20px; }
+  @media (max-width: 600px) { .games-grid { grid-template-columns: 1fr; } }
+
+  .game-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.06); transition: box-shadow 0.2s; }
+  .game-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+
+  /* ── Game header ── */
+  .game-header { background: var(--navy); color: white; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .matchup { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
+  .team-abbr { display: inline-flex; align-items: center; gap: 5px; }
+  .team-logo { width: 28px; height: 28px; object-fit: contain; }
+  .vs-sep { font-size: 11px; opacity: 0.6; font-weight: 400; }
+  .game-meta { text-align: right; font-size: 12px; opacity: 0.85; }
+  .game-time { font-weight: 700; font-size: 13px; }
+  .game-venue { opacity: 0.7; margin-top: 1px; }
+  .game-status-pill { display: inline-block; background: rgba(255,255,255,0.2); border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 600; margin-top: 3px; }
+  .game-status-pill.live { background: #d50032; }
+  .game-status-pill.final { background: rgba(255,255,255,0.15); }
+
+  /* ── Goalie row (mirrors pitcher row) ── */
+  .goalies-row { display: grid; grid-template-columns: 1fr 1fr; background: #f4ebdd; border-bottom: 1px solid var(--border); }
+  .goalie-cell { padding: 10px 14px; display: flex; align-items: center; gap: 10px; }
+  .goalie-cell + .goalie-cell { border-left: 1px solid var(--border); }
+  .goalie-photo { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 2px solid var(--border); background: #ede7db; flex-shrink: 0; }
+  .goalie-info { min-width: 0; }
+  .goalie-name { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .goalie-name a { color: inherit; text-decoration: none; }
+  .goalie-name a:hover { color: var(--navy); text-decoration: underline; }
+  .goalie-stats-line { font-size: 11px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; }
+
+  /* ── Rosters two-column layout ── */
+  .rosters-row { display: grid; grid-template-columns: 1fr 1fr; }
+  .roster-col { padding: 10px 14px; min-width: 0; overflow: hidden; }
+  .roster-col + .roster-col { border-left: 1px solid var(--border); }
+  .roster-col-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-light); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .roster-col-label img { width: 18px; height: 18px; object-fit: contain; }
+
+  /* ── Roster player rows ── */
+  .roster-list { list-style: none; }
+  li.pos-group-label { display: block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.9px; color: var(--text-light); padding: 6px 0 2px; border-top: 1px solid #eee8e0; margin-top: 2px; }
+  li.pos-group-label:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+  .roster-player { display: flex; align-items: center; gap: 4px; padding: 3px 0; border-bottom: 1px solid #f3f4f6; font-size: 12.5px; line-height: 1.4; }
+
+  .jersey-num { color: var(--number-color); font-size: 12px; font-weight: 800; min-width: 22px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; }
+  .player-name-link { display: inline-block; color: var(--text); text-decoration: none; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .player-name-link:hover { color: var(--navy); text-decoration: underline; }
+  .player-hand { color: var(--text-light); font-size: 10px; flex-shrink: 0; }
+  .player-pos { color: var(--text-muted); font-size: 11px; font-weight: 600; flex-shrink: 0; min-width: 22px; text-align: right; }
+
+  .player-stats-inline { display: flex; align-items: center; gap: 5px; flex-shrink: 0; justify-content: center; }
+  .stat-frac { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.1; font-size: 9px; color: var(--text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; white-space: nowrap; }
+  .stat-frac .numer { font-weight: 700; color: var(--text); border-bottom: 1px solid var(--text-muted); width: 100%; text-align: center; padding-bottom: 1px; }
+  .stat-frac .denom { color: var(--text-light); padding-top: 1px; }
+
+  /* ── Player tooltip ── */
+  .player-tooltip { display: none; position: fixed; background: #3b214a; color: white; border-radius: 7px; padding: 4px 6px; font-size: 11px; font-weight: 500; white-space: nowrap; z-index: 9999; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,0.25); gap: 8px; align-items: center; }
+  .player-tooltip.visible { display: flex; }
+  .tooltip-hits { display: flex; gap: 5px; align-items: center; margin-left: 4px; }
+  .tooltip-hit { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 3px; background: rgba(255,255,255,0.15); font-size: 10px; font-weight: 700; }
+  .tooltip-dob { opacity: 0.85; }
+  .tooltip-frac { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.15; font-size: 10px; }
+  .tooltip-frac .tn { font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.5); width: 100%; text-align: center; padding-bottom: 1px; opacity: 0.85; }
+  .tooltip-frac .td { opacity: 0.85; padding-top: 1px; }
+
+  /* ── Game footer ── */
+  .game-footer { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--border); background: #f4ebdd; }
+  .game-footer a { font-size: 12px; font-weight: 600; color: var(--navy); text-decoration: none; padding: 5px 12px; border: 1px solid var(--border); border-radius: 5px; transition: background 0.1s; }
+  .game-footer a:hover { background: #ece6da; }
+  .game-footer a.primary { background: #3b214a; color: white; border-color: #3b214a; }
+  .game-footer a.primary:hover { background: #084d3e; }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+  .empty-state h3 { font-size: 20px; margin-bottom: 8px; color: var(--text); }
+
+  .skeleton { background: linear-gradient(90deg, #ede7db 25%, #f5efe3 50%, #ede7db 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; border-radius: 4px; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  .note-bar { font-size: 11px; color: #3b214a; margin-bottom: 16px; }
+  .note-bar span { color: var(--number-color); font-weight: 700; }
+
+  .tbd-roster { color: var(--text-light); font-style: italic; font-size: 12px; padding: 8px 0; text-align: center; }
+
+  /* ── Diagnostics panel ── */
+
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner"></div>
+</header>
+
+<div class="page-container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Game Day Rosters</h1>
+      <div class="date-badge" id="date-subtitle"></div>
+      <div class="note-bar" style="margin-top:4px;">All times Pacific &nbsp;|&nbsp; G &nbsp;A &nbsp;PTS &nbsp;· hover G for shots</div>
+    </div>
+    <div class="date-nav">
+      <button class="date-nav-btn" onclick="changeDate(-1)" title="Previous day">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div class="date-nav-label" id="date-display" onclick="toggleCalendar(event)"></div>
+      <button class="date-nav-btn" onclick="changeDate(1)" title="Next day">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+    <div class="controls">
+      <button class="refresh-btn" id="refresh-btn" onclick="loadLineups()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+          <path d="M21 3v5h-5"/>
+          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+          <path d="M8 16H3v5"/>
+        </svg>
+        Refresh Rosters
+      </button>
+
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <div class="filter-bar" style="margin-bottom:0;">
+      <div class="multi-select" id="team-filter-wrap">
+        <button class="multi-select-btn" id="team-filter-btn" onclick="toggleTeamDropdown(event)">
+          All Teams <span class="multi-select-arrow">▾</span>
+        </button>
+        <div class="multi-select-dropdown" id="team-filter-dropdown"></div>
+      </div>
+    </div>
+    <div class="status-bar" id="status-bar" style="margin-bottom:0;text-align:right;"></div>
+  </div>
+
+  <div class="games-grid" id="games-grid">
+    <div style="grid-column:1/-1; padding:40px; text-align:center; color:#9ca3af; font-size:15px;">
+      Click <strong>Refresh Rosters</strong> to load today's games.
+    </div>
+  </div>
+</div>
+
+<script>
+// ESPN — open CORS, used for schedule + roster
+const ESPN_NHL = 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl';
+const ESPN_HS  = id => `https://a.espncdn.com/i/headshots/nhl/players/full/${id}.png`;
+
+const ESPN_CORE_NHL = 'https://sports.core.api.espn.com/v2/sports/hockey/leagues/nhl';
+
+let currentDate      = new Date();
+let allGames         = [];
+let rosterCache      = {};        // keyed by ESPN team ID
+let playerStatsCache = {};
+let ptsRollingCache  = {};        // ESPN common/v3 gamelog
+
+const formatDate     = d =>
+  `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const formatDateESPN = d =>
+  `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+
+// Direct fetch — ESPN allows it without a proxy
+async function apiFetch(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function updateDateDisplay() {
+  const label = currentDate.toLocaleDateString('en-US', { weekday:'short', month:'long', day:'numeric', year:'numeric' });
+  document.getElementById('date-display').textContent = label;
+  const sub = currentDate.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' });
+  document.getElementById('date-subtitle').textContent = sub;
+}
+
+function changeDate(delta) {
+  currentDate = new Date(currentDate);
+  currentDate.setDate(currentDate.getDate() + delta);
+  updateDateDisplay();
+  loadLineups();
+}
+
+updateDateDisplay();
+
+// ── Schedule parser ───────────────────────────────────────────────
+function parseEvent(ev) {
+  const comp = ev.competitions?.[0] || {};
+  // homeAway is reliably lowercase "home"/"away" in ESPN's NHL feed
+  const home = comp.competitors?.find(c => c.homeAway === 'home')
+            || comp.competitors?.[0] || {};
+  const away = comp.competitors?.find(c => c.homeAway === 'away')
+            || comp.competitors?.[1] || {};
+  const status = comp.status || {};
+  const rec    = c => {
+    if (c.records?.length) {
+      const r = c.records.find(r => r.type === 'total' || r.type === 'overall' || /^(all|total)$/i.test(r.name || ''));
+      if (r?.summary) return r.summary;
+    }
+    return c.record || '';   // fallback: ESPN sometimes puts record as a plain string
+  };
+  // team.id and competitor id are the same value in ESPN NHL; use either
+  const tid = c => c.team?.id || c.id || '';
+  return {
+    id:           ev.id,
+    homeTeam:     { id: tid(home), abbrev: home.team?.abbreviation || '', logo: home.team?.logo || '', score: home.score ?? '', record: rec(home) },
+    awayTeam:     { id: tid(away), abbrev: away.team?.abbreviation || '', logo: away.team?.logo || '', score: away.score ?? '', record: rec(away) },
+    venue:        comp.venue?.fullName || '',
+    startDate:    ev.date || '',
+    statusState:  status.type?.state || 'pre',
+    statusDetail: status.type?.shortDetail || '',
+    seasonType:   ev.season?.type ?? 2,
+  };
+}
+
+// ── Roster fetch ─────────────────────────────────────────────────
+async function fetchRoster(teamId) {
+  if (!teamId) return { forwards: [], defensemen: [], goalies: [] };
+  const cached = rosterCache[teamId];
+  if (cached && !cached.failed) return cached;
+  try {
+    const d = await apiFetch(`${ESPN_NHL}/teams/${teamId}/roster`);
+    // ESPN wraps grouped athletes under either `athletes` or `roster`
+    const arr = d.athletes || d.roster || [];
+    let forwards = [], defensemen = [], goalies = [];
+
+    // ── Try grouped format first ──
+    // ESPN NHL uses groups like "Centers", "Left Wings", "Right Wings", "Defensemen", "Goalies"
+    const groupPlayers = g => g.items || g.athletes || [];
+    const firstGroup   = arr[0];
+    const hasGroups    = arr.length > 0 && (firstGroup?.items?.length > 0 || firstGroup?.athletes?.length > 0
+                          || (firstGroup && ('items' in firstGroup || 'athletes' in firstGroup)));
+
+    if (hasGroups) {
+      const posStr = g => (typeof g.position === 'string'
+        ? g.position
+        : (g.position?.displayName || g.position?.name || '')
+      ).toLowerCase();
+      const isDefGrp  = g => posStr(g).includes('defens');
+      const isGoalGrp = g => posStr(g).includes('goal');
+      forwards   = arr.filter(g => !isDefGrp(g) && !isGoalGrp(g)).flatMap(groupPlayers);
+      defensemen = groupPlayers(arr.find(isDefGrp)  || {});
+      goalies    = groupPlayers(arr.find(isGoalGrp) || {});
+    }
+
+    // ── Flat format fallback (each element is a player, not a group) ──
+    if (!forwards.length && !defensemen.length && !goalies.length && arr.length) {
+      const classify = p => {
+        const abbr   = (p.position?.abbreviation || '').toUpperCase();
+        const name   = (p.position?.name || p.position?.displayName || '').toLowerCase();
+        const parent = (p.position?.parent?.name || p.position?.parent?.displayName || '').toLowerCase();
+        if (abbr === 'G' || name.includes('goal')   || parent.includes('goal'))   return 'G';
+        if (abbr === 'D' || name.includes('defens')  || parent.includes('defens')) return 'D';
+        return 'F';
+      };
+      arr.forEach(p => {
+        if (!p?.id) return;
+        const c = classify(p);
+        if      (c === 'G') goalies.push(p);
+        else if (c === 'D') defensemen.push(p);
+        else                forwards.push(p);
+      });
+    }
+
+
+
+    // Pre-seed DOB + isGoalie so the tooltip has context before the stats hover
+    const seedPlayer = (p, isGoalie) => {
+      if (!playerStatsCache[p.id] || playerStatsCache[p.id].failed)
+        playerStatsCache[p.id] = { dob: p.dateOfBirth?.substring(0, 10) || null, isGoalie };
+    };
+    forwards.forEach(p   => seedPlayer(p, false));
+    defensemen.forEach(p => seedPlayer(p, false));
+    goalies.forEach(p    => seedPlayer(p, true));
+
+    if (forwards.length || defensemen.length || goalies.length) {
+      rosterCache[teamId] = { forwards, defensemen, goalies };
+    } else {
+      // Got a response but parsed no players — don't cache success so next refresh retries
+      console.warn(`[roster ${teamId}] parsed 0 players; will retry next refresh`);
+      rosterCache[teamId] = { failed: true, forwards: [], defensemen: [], goalies: [] };
+    }
+  } catch(e) {
+    console.error('[roster ' + teamId + '] fetch failed:', e.message);
+    rosterCache[teamId] = { failed: true, forwards: [], defensemen: [], goalies: [] };
+  }
+  return rosterCache[teamId];
+}
+
+// ── Goalie stats line text (shared by initial render + background update) ──
+function goalieStatsLine(stats) {
+  if (!stats || stats.failed) return 'Loading…';
+  if (stats.isGoalie && stats.sW != null) {
+    const w   = Math.round(+stats.sW);
+    const l   = Math.round(+stats.sL);
+    const otl = Math.round(+stats.sOTL);
+    return `${w}-${l}-${otl}`;
+  }
+  return stats.sGP != null ? `${stats.sGP} GP this season` : 'G';
+}
+
+// ── Player stats — ESPN common/v3 (career) + sports.core (season) ──
+async function fetchPlayerStats(playerId) {
+  const cached = playerStatsCache[playerId];
+  if (cached && !cached.failed && cached.sGP !== undefined) return cached;
+  const prev       = playerStatsCache[playerId] || {};
+  const existingDob     = prev.dob      || null;
+  const existingIsGoalie = prev.isGoalie ?? null;
+
+  try {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth() + 1;
+    const seasonYear = (m >= 10 ? y : y - 1) + 1;   // e.g. 2027 for the 2026-27 season
+
+    const [cv3Res, coreRes] = await Promise.allSettled([
+      apiFetch(`https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${playerId}/stats`),
+      apiFetch(`${ESPN_CORE_NHL}/seasons/${seasonYear}/types/2/athletes/${playerId}/statistics/0`),
+    ]);
+
+    // ── Career from common/v3 (totals[] parallel to names[]) ──
+    let cGP = null, cG = null, cA = null, cPTS = null, cSOG = null;
+    // ── Season from common/v3 seasonTotals[] (backup) or sports.core (primary) ──
+    let sGP = null, sG = null, sA = null, sPTS = null, sSOG = null;
+    let sW = null, sL = null, sOTL = null, sGAA = null, sSVP = null;
+
+    if (cv3Res.status === 'fulfilled') {
+      for (const cat of (cv3Res.value?.categories || [])) {
+        (cat.names || []).forEach((nm, i) => {
+          const tot = cat.totals?.[i];
+          const sea = cat.seasonTotals?.[i];
+          if (nm === 'games' || nm === 'gamesPlayed') { if (tot != null) cGP  = tot; if (sea != null) sGP  = sea; }
+          if (nm === 'goals')                         { if (tot != null) cG   = tot; if (sea != null) sG   = sea; }
+          if (nm === 'assists')                       { if (tot != null) cA   = tot; if (sea != null) sA   = sea; }
+          if (nm === 'points')                        { if (tot != null) cPTS = tot; if (sea != null) sPTS = sea; }
+          if (nm === 'shots' || nm === 'S' || nm === 'shotsOnGoal' || nm === 'shotsTotal' || /^(sog|shotsongoal|shotstotal)$/i.test(nm))
+                                                      { if (tot != null) cSOG = tot; if (sea != null) sSOG = sea; }
+        });
+      }
+    }
+
+    // ── Season from sports.core (more current; overrides cv3 season backup) ──
+    const parseCoreStats = cats => {
+      for (const cat of (cats || [])) {
+        for (const s of (cat.stats || [])) {
+          const v = s.displayValue;
+          switch (s.name?.toLowerCase()) {
+            case 'goals':                                   if (sG   == null || +sG   === 0) sG   = v; break;
+            case 'assists':                                 if (sA   == null || +sA   === 0) sA   = v; break;
+            case 'points':                                  if (sPTS == null || +sPTS === 0) sPTS = v; break;
+            case 'games': case 'gamesplayed': case 'gp':   if (sGP  == null || +sGP  === 0) sGP  = v; break;
+            case 'shots': case 'shotsongoal': case 'sog': case 'shotstotal': case 'shotsontarget':
+              if (sSOG == null || +sSOG === 0) sSOG = v; break;
+            case 'wins':   case 'w':
+              if (sW   == null || +sW   === 0) sW   = v; break;
+            case 'losses': case 'l':
+              if (sL   == null || +sL   === 0) sL   = v; break;
+            case 'overtimelosses': case 'otlosses': case 'otl': case 'ot': case 'otloss':
+              if (sOTL == null || +sOTL === 0) sOTL = v; break;
+            case 'goalsagainstaverage': case 'gaa': sGAA = parseFloat(v).toFixed(2); break;
+            case 'savepctg': case 'savepercentage': case 'sv%': case 'svp':
+              sSVP = parseFloat(v).toFixed(3).replace('0.', '.'); break;
+          }
+        }
+      }
+    };
+
+    if (coreRes.status === 'fulfilled')
+      parseCoreStats(coreRes.value?.splits?.categories);
+
+    const result = {
+      dob:      existingDob,
+      isGoalie: existingIsGoalie,
+      sGP: sGP ?? 0,   cGP:  cGP  ?? null,
+      sG:  sG  ?? 0,   cG:   cG   ?? null,
+      sA:  sA  ?? 0,   cA:   cA   ?? null,
+      sPTS: sPTS ?? 0, cPTS: cPTS ?? null,
+      sSOG: sSOG ?? 0, cSOG: cSOG ?? null,
+      sW, sL, sOTL, sGAA, sSVP,
+    };
+    playerStatsCache[playerId] = result;
+    return result;
+  } catch(e) {
+    console.warn('fetchPlayerStats failed for', playerId, e.message);
+    playerStatsCache[playerId] = { failed: true, dob: existingDob, isGoalie: existingIsGoalie };
+    return null;
+  }
+}
+
+// ── Rolling pts/game — ESPN common/v3 gamelog ────────────────────
+async function fetchPtsRolling(playerId) {
+  const cached = ptsRollingCache[playerId];
+  if (cached && !cached.failed) return cached;
+  try {
+    const now0 = new Date();
+    const seasonStartYear0 = (now0.getMonth() + 1) >= 10 ? now0.getFullYear() : now0.getFullYear() - 1;
+    const glBase = `https://site.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/${playerId}/gamelog`;
+
+    // Fetch current season + previous seasons in parallel for career totals
+    const prevSeasons = [seasonStartYear0 - 1, seasonStartYear0 - 2, seasonStartYear0 - 3];
+    const [currResult, ...prevResults] = await Promise.allSettled([
+      apiFetch(glBase),
+      ...prevSeasons.map(yr => apiFetch(`${glBase}?season=${yr}`)),
+    ]);
+    if (currResult.status !== 'fulfilled') throw new Error('gamelog fetch failed');
+    const d = currResult.value;
+    const prevData = prevResults.filter(r => r.status === 'fulfilled').map(r => r.value);
+
+    // common/v3 gamelog: events keyed by event ID, labels + values arrays
+    // ESPN may return d.labels (short: 'S') OR d.names (full: 'shotsOnGoal') — check both
+    const labels     = d.labels  || d.names  || [];
+
+    const goalsIdx   = labels.findIndex(l => l === 'G'  || /^goals?$/i.test(l));
+    const assistsIdx = labels.findIndex(l => l === 'A'  || /^assists?$/i.test(l));
+    // 'S' in labels OR 'shotsOnGoal' / 'SOG' / 'shots' in either array
+    const isShotsLabel = l => /^(S|SOG|shots?|shots?Total|shots?OnGoals?)$/i.test(l);
+    const shotsIdx = (() => {
+      const i = labels.findIndex(isShotsLabel);
+      if (i >= 0) return i;
+      // If labels[] are short codes, names[] may have the full name at the same index
+      return names.findIndex(isShotsLabel);
+    })();
+
+    // Collect all game entries, most-recent first
+    // ESPN keyed-object events: sort by the KEY (game ID) descending so games[0] = most recent.
+    // Values may be plain stats arrays or objects — either way, wrap them consistently.
+    const toArray = v => {
+      if (Array.isArray(v)) return v;
+      if (!v || typeof v !== 'object') return [];
+      return Object.entries(v)
+        .sort(([a], [b]) => +b - +a)   // descending by eventId key
+        .map(([id, val]) =>
+          Array.isArray(val)            ? { eventId: id, stats: val }     // raw array → wrap
+          : (val && typeof val === 'object') ? (val.eventId ? val : { eventId: id, ...val })
+          : { eventId: id, stats: [] }
+        );
+    };
+    // Only use the current NHL season's regular season games
+    const seasonStartYear = seasonStartYear0;
+
+    let games = [];
+    if (d.seasonTypes?.length) {
+      // Pick the regular season type whose year matches the current season;
+      // fall back to the first regular season in the list (most recent from ESPN's no-param endpoint)
+      const reg = d.seasonTypes.find(t => {
+        const name = t.type || t.displayName || t.name || '';
+        return /regular/i.test(name) && name.includes(String(seasonStartYear));
+      }) || d.seasonTypes.find(t => /regular/i.test(t.type || t.displayName || t.name || ''));
+      if (!reg) {
+        ptsRollingCache[playerId] = { lastPts: [], lastShots: [], l7: 0, l15: 0, l30: 0, seasonShots: 0, seasonGP: 0 };
+        return ptsRollingCache[playerId];
+      }
+      if (reg?.categories?.length) {
+        for (const cat of reg.categories) {
+          const catEvents = toArray(cat?.events);
+          if (catEvents.length > 0) { games = catEvents; break; }
+        }
+      }
+      if (!games.length) games = toArray(reg?.events);
+    }
+    // Note: d.events is game *metadata* (links, opponent), not player stats — don't use it
+
+    // Each event entry may be: an object with .stats/.values array, OR the stats array itself
+    const getStats = e => Array.isArray(e) ? e : (e.stats || e.values || e.statistics || []);
+
+
+    const getPts = e => {
+      const s = getStats(e);
+      if (Array.isArray(s))
+        return (goalsIdx >= 0 ? +s[goalsIdx] || 0 : 0) + (assistsIdx >= 0 ? +s[assistsIdx] || 0 : 0);
+      return (+s.goals || +s.G || 0) + (+s.assists || +s.A || 0);
+    };
+
+    const getShots = e => {
+      const s = getStats(e);
+      if (Array.isArray(s)) return shotsIdx >= 0 ? +s[shotsIdx] || 0 : 0;
+      return +s.shots || +s.shotsOnGoal || +s.shotsTotal || +s.SOG || +s.S || 0;
+    };
+
+    const avg = n => {
+      const sl = games.slice(0, n);
+      return sl.length ? (sl.reduce((sum, e) => sum + getPts(e), 0) / sl.length).toFixed(2) : '—';
+    };
+
+    // Career totals: sum shots + pts + GP across ALL regular season types in current + previous gamelogs
+    let careerShots = 0, careerPts = 0, careerGP = 0;
+    const sumRegularSeasons = src => {
+      for (const st of (src.seasonTypes || [])) {
+        const stName = st.type || st.displayName || st.name || '';
+        if (!/regular/i.test(stName)) continue;
+        for (const cat of (st.categories || [])) {
+          const evts = toArray(cat?.events);
+          if (evts.length > 0) {
+            careerShots += evts.reduce((sum, e) => sum + getShots(e), 0);
+            careerPts   += evts.reduce((sum, e) => sum + getPts(e),   0);
+            careerGP    += evts.length;
+            break; // first category per season = full-season totals; skip splits
+          }
+        }
+      }
+    };
+    sumRegularSeasons(d);
+    prevData.forEach(sumRegularSeasons);
+
+    ptsRollingCache[playerId] = {
+      lastPts:    games.slice(0, 3).map(getPts),
+      lastShots:  games.slice(0, 5).map(getShots),
+      l7: avg(7), l15: avg(15), l30: avg(30),
+      seasonShots: games.reduce((sum, e) => sum + getShots(e), 0),
+      seasonPts:   games.reduce((sum, e) => sum + getPts(e),   0),
+      seasonGP:    games.length,
+      careerShots,
+      careerPts,
+      careerGP,
+    };
+    return ptsRollingCache[playerId];
+  } catch(e) {
+    ptsRollingCache[playerId] = { failed: true };
+    return null;
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+function formatGameTime(dateStr) {
+  try {
+    return new Date(dateStr).toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles',
+    });
+  } catch { return ''; }
+}
+
+function playerName(p) {
+  return p.fullName || p.displayName || `${p.firstName || ''} ${p.lastName || ''}`.trim();
+}
+
+function playerLink(p) {
+  const l = (p.links || []).find(l => (l.rel || []).includes('playercard'));
+  return l?.href || `https://www.espn.com/nhl/player/_/id/${p.id}`;
+}
+
+
+const REFRESH_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>`;
+
+// ── Skeleton placeholder card ─────────────────────────────────────
+function skeletonCard(game, i) {
+  return `
+    <div class="game-card" id="game-slot-${i}">
+      <div class="game-header">
+        <div class="matchup" style="opacity:0.75;">
+          <span class="team-abbr">
+            <img class="team-logo" src="${game.awayTeam.logo}" onerror="this.style.display='none'" alt="${game.awayTeam.abbrev}">
+            ${game.awayTeam.abbrev}
+          </span>
+          <span class="vs-sep">@</span>
+          <span class="team-abbr">
+            <img class="team-logo" src="${game.homeTeam.logo}" onerror="this.style.display='none'" alt="${game.homeTeam.abbrev}">
+            ${game.homeTeam.abbrev}
+          </span>
+        </div>
+        <div class="skeleton" style="width:60px;height:14px;border-radius:4px;opacity:0.4;"></div>
+      </div>
+      <div style="padding:14px 16px;display:flex;flex-direction:column;gap:9px;">
+        ${Array(12).fill(0).map((_, j) =>
+          `<div class="skeleton" style="width:${j % 3 === 2 ? 55 : j % 3 === 1 ? 75 : 90}%;height:12px;"></div>`
+        ).join('')}
+      </div>
+    </div>`;
+}
+
+// ── Main load ─────────────────────────────────────────────────────
+async function loadLineups() {
+  const btn    = document.getElementById('refresh-btn');
+  const grid   = document.getElementById('games-grid');
+  const status = document.getElementById('status-bar');
+
+  btn.classList.add('loading');
+  btn.innerHTML = `${REFRESH_SVG} Loading...`;
+  status.className = 'status-bar';
+  status.textContent = 'Fetching schedule…';
+
+  try {
+    const d     = await apiFetch(`${ESPN_NHL}/scoreboard?dates=${formatDateESPN(currentDate)}`);
+    const games = (d.events || [])
+      .filter(e => (e.season?.type ?? 2) >= 2)   // skip preseason (type 1)
+      .map(parseEvent);
+
+    if (!games.length) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>No games today</h3><p>Check back on a game day!</p></div>`;
+      status.textContent = 'No games scheduled.';
+      btn.classList.remove('loading'); btn.innerHTML = `${REFRESH_SVG} Refresh Rosters`;
+      return;
+    }
+
+    allGames = games;
+    populateTeamFilter(games);
+
+    // Paint skeleton cards immediately — teams are visible before any roster loads
+    grid.innerHTML = games.map((g, i) => skeletonCard(g, i)).join('');
+    status.textContent = `Found ${games.length} game${games.length !== 1 ? 's' : ''}. Loading rosters…`;
+
+    // Each game fetches only its own 2 rosters and renders independently.
+    // Games whose rosters are already cached appear instantly; others trickle in
+    // without blocking each other or hammering the proxy all at once.
+    let loaded = 0;
+    await Promise.all(games.map(async (game, i) => {
+      await Promise.all([
+        fetchRoster(game.awayTeam.abbrev),
+        fetchRoster(game.homeTeam.abbrev),
+      ]);
+
+      // Swap skeleton for the real card
+      const slot = document.getElementById(`game-slot-${i}`);
+      if (slot) slot.outerHTML = buildGameCard(game);
+
+      loaded++;
+      status.textContent = `Loaded ${loaded} of ${games.length} game${games.length !== 1 ? 's' : ''}…`;
+
+      // Background: patch goalie stat lines as each resolves
+      const awayGoalies = (rosterCache[game.awayTeam.abbrev]?.goalies || []).slice(0, 2);
+      const homeGoalies = (rosterCache[game.homeTeam.abbrev]?.goalies || []).slice(0, 2);
+      [...awayGoalies, ...homeGoalies].forEach(g => {
+        fetchPlayerStats(g.id).then(stats => {
+          const el = document.getElementById(`gs-${g.id}`);
+          if (el) el.textContent = goalieStatsLine(stats);
+        });
+      });
+    }));
+
+    status.textContent = `Last updated: ${new Date().toLocaleTimeString()} — loading player stats…`;
+
+    // Background-fetch stats for every rostered player, filling fracs as each resolves.
+    // Concurrency-limited so we don't saturate the browser's connection pool.
+    const allIds = [...new Set(
+      Object.values(rosterCache)
+        .filter(r => !r.failed)
+        .flatMap(r => [...r.forwards, ...r.defensemen, ...r.goalies].map(p => p.id))
+    )];
+    const STAT_LIMIT = 8;
+    let statActive = 0;
+    const statQueue = [...allIds];
+
+    function drainStats() {
+      while (statActive < STAT_LIMIT && statQueue.length) {
+        const id = statQueue.shift();
+        statActive++;
+        fetchPlayerStats(id)
+          .then(() => { updatePlayerFracs(id); })
+          .finally(() => {
+            statActive--;
+            if (statQueue.length || statActive > 0) drainStats();
+            else status.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+          });
+      }
+    }
+    drainStats();
+
+  } catch(e) {
+    console.error(e);
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column:1/-1">
+        <h3>Failed to load schedule</h3>
+        <p style="color:#6b7280;font-size:13px;margin-top:8px;">${e.message}</p>
+      </div>`;
+    status.className = 'status-bar error';
+    status.textContent = `Error: ${e.message}`;
+  }
+
+  btn.classList.remove('loading');
+  btn.innerHTML = `${REFRESH_SVG} Refresh Rosters`;
+}
+
+// ── Team filter ───────────────────────────────────────────────────
+function populateTeamFilter(games) {
+  const drop  = document.getElementById('team-filter-dropdown');
+  const teams = new Map();
+  games.forEach(g => {
+    teams.set(g.awayTeam.abbrev, g.awayTeam.abbrev);
+    teams.set(g.homeTeam.abbrev, g.homeTeam.abbrev);
+  });
+  const sorted = [...teams.entries()].sort((a,b) => a[0].localeCompare(b[0]));
+  drop.innerHTML = `
+    <label class="multi-select-option all-option">
+      <input type="checkbox" id="filter-all" checked onchange="toggleAllTeams(this)"> All Teams
+    </label>` +
+    sorted.map(([abbr]) =>
+      `<label class="multi-select-option">
+        <input type="checkbox" class="team-cb" value="${abbr}" checked onchange="filterGames()"> ${abbr}
+      </label>`).join('');
+}
+
+function toggleTeamDropdown(e) {
+  e.stopPropagation();
+  document.getElementById('team-filter-dropdown').classList.toggle('open');
+}
+
+function toggleAllTeams(cb) {
+  document.querySelectorAll('.team-cb').forEach(c => c.checked = cb.checked);
+  filterGames();
+}
+
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('team-filter-wrap');
+  if (wrap && !wrap.contains(e.target))
+    document.getElementById('team-filter-dropdown').classList.remove('open');
+  const cal = document.getElementById('calendar-dropdown');
+  if (cal && cal.classList.contains('open') && !cal.contains(e.target)) closeCalendar();
+});
+
+function filterGames() {
+  const checked = [...document.querySelectorAll('.team-cb:checked')].map(c => c.value);
+  const allCb   = document.getElementById('filter-all');
+  const total   = document.querySelectorAll('.team-cb').length;
+  if (allCb) allCb.checked = checked.length === total;
+  updateFilterBtn(checked, total);
+  document.querySelectorAll('.game-card[data-away][data-home]').forEach(c => {
+    c.style.display = (checked.includes(c.dataset.away) || checked.includes(c.dataset.home)) ? '' : 'none';
+  });
+}
+
+function updateFilterBtn(checked, total) {
+  const btn = document.getElementById('team-filter-btn');
+  if (!btn) return;
+  const label = checked.length === 0 ? 'No Teams'
+    : checked.length === total ? 'All Teams'
+    : checked.length === 1 ? (document.querySelector('.team-cb[value="'+checked[0]+'"]')?.closest('label')?.textContent?.trim() || '1 Team')
+    : checked.length + ' Teams';
+  btn.innerHTML = label + ' <span class="multi-select-arrow">▾</span>';
+}
+
+// ── Card builder ──────────────────────────────────────────────────
+function buildGameCard(game) {
+  const away       = game.awayTeam;
+  const home       = game.homeTeam;
+  const awayRoster = rosterCache[away.abbrev] || { forwards:[], defensemen:[], goalies:[] };
+  const homeRoster = rosterCache[home.abbrev] || { forwards:[], defensemen:[], goalies:[] };
+
+  const isLive  = game.statusState === 'in';
+  const isFinal = game.statusState === 'post';
+  const scoreHtml = (isLive || isFinal)
+    ? `<span style="font-size:15px;font-weight:900;letter-spacing:1px;margin-left:6px;">${away.score}–${home.score}</span>`
+    : '';
+  const timeHtml = isLive
+    ? `<div class="game-status-pill live">${game.statusDetail || 'LIVE'}</div>`
+    : isFinal
+      ? `<div class="game-status-pill final">Final</div>`
+      : `<div class="game-time">${formatGameTime(game.startDate)}</div>`;
+
+  // ── Goalie cell ──
+  const goalieCell = goalie => {
+    if (!goalie) return `<div class="goalie-cell"><div style="font-size:12px;color:#9ca3af;font-style:italic;padding:4px 0;">No goalie data</div></div>`;
+    const stats = playerStatsCache[goalie.id];
+    const name  = playerName(goalie);
+    const num   = goalie.jersey ?? '—';
+    const hsrc  = goalie.headshot?.href || ESPN_HS(goalie.id);
+    const href  = playerLink(goalie);
+    return `
+      <div class="goalie-cell">
+        <img class="goalie-photo" src="${hsrc}" onerror="this.style.display='none'" alt="${name}">
+        <div class="goalie-info">
+          <div class="goalie-name">
+            <a href="${href}" target="_blank"
+              onmouseenter="fetchPlayerStats(${goalie.id}).then(()=>onStatsLoaded(this,${goalie.id},true))"
+              onmouseleave="hideTooltip()">#${num} ${name}</a>
+          </div>
+          <div class="goalie-stats-line" id="gs-${goalie.id}">${goalieStatsLine(stats)}</div>
+        </div>
+      </div>`;
+  };
+
+  // ── Roster column ──
+  const buildGroup = (players, label) => {
+    if (!players.length) return '';
+    const rows = players.map(p => {
+      const name = playerName(p);
+      const num  = p.jersey ?? '—';
+      const hand = p.hand?.type || '';
+      const pos  = p.position?.abbreviation || '';
+      const href = playerLink(p);
+      const fracs = `<span class="player-stats-inline">
+        <span class="stat-frac" style="cursor:default;"
+          onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>showShotsTooltip(this,${p.id}))"
+          onmouseleave="hideShotsTooltip()">
+          <span class="numer" id="sg-${p.id}">—</span><span class="denom" id="cg-${p.id}">—</span>
+        </span>
+        <span class="stat-frac"><span class="numer" id="sa-${p.id}">—</span><span class="denom" id="ca-${p.id}">—</span></span>
+        <span class="stat-frac" style="cursor:default;"
+          onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>{updatePlayerFracs(${p.id});showPtsRolling(this,${p.id})})"
+          onmouseleave="hidePtsRolling()">
+          <span class="numer" id="spts-${p.id}">—</span><span class="denom" id="cpts-${p.id}">—</span>
+        </span>
+      </span>`;
+      return `<li class="roster-player">
+        <span class="jersey-num">#${num}</span>
+        <a class="player-name-link" href="${href}" target="_blank"><span
+          onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>onStatsLoaded(this,${p.id},false))"
+          onmouseleave="hideTooltip()">${name}</span></a>
+
+        ${fracs}
+        <span class="player-pos">${pos}</span>
+      </li>`;
+    }).join('');
+    return `<li class="pos-group-label">${label}</li>${rows}`;
+  };
+
+  const rosterCol = (roster, team) => {
+    if (!roster.forwards.length && !roster.defensemen.length && !roster.goalies.length)
+      return `<div class="tbd-roster">Roster unavailable</div>`;
+    return `<ul class="roster-list">
+      ${buildGroup(roster.forwards,   'Forwards')}
+      ${buildGroup(roster.defensemen, 'Defense')}
+      ${buildGroup(roster.goalies,    'Goalies')}
+    </ul>`;
+  };
+
+  return `
+<div class="game-card" data-away="${away.abbrev}" data-home="${home.abbrev}">
+  <div class="game-header">
+    <div class="matchup">
+      <span class="team-abbr">
+        <img class="team-logo" src="${away.logo}" onerror="this.style.display='none'" alt="${away.abbrev}">
+        ${away.abbrev}
+        ${away.record ? `<span style="font-weight:400;opacity:0.65;font-size:12px">(${away.record})</span>` : ''}
+      </span>
+      <span class="vs-sep">@</span>
+      <span class="team-abbr">
+        <img class="team-logo" src="${home.logo}" onerror="this.style.display='none'" alt="${home.abbrev}">
+        ${home.abbrev}
+        ${home.record ? `<span style="font-weight:400;opacity:0.65;font-size:12px">(${home.record})</span>` : ''}
+      </span>
+      ${scoreHtml}
+    </div>
+    <div class="game-meta">
+      ${timeHtml}
+      <div class="game-venue">${game.venue}</div>
+    </div>
+  </div>
+
+  <div class="goalies-row">
+    ${goalieCell(awayRoster.goalies[0] || null)}
+    ${goalieCell(homeRoster.goalies[0] || null)}
+  </div>
+
+  <div class="rosters-row">
+    <div class="roster-col">
+      <div class="roster-col-label">
+        <img src="${away.logo}" onerror="this.style.display='none'" alt="${away.abbrev}">
+        ${away.abbrev} Roster
+      </div>
+      ${rosterCol(awayRoster, away)}
+    </div>
+    <div class="roster-col">
+      <div class="roster-col-label">
+        <img src="${home.logo}" onerror="this.style.display='none'" alt="${home.abbrev}">
+        ${home.abbrev} Roster
+      </div>
+      ${rosterCol(homeRoster, home)}
+    </div>
+  </div>
+
+  <div class="game-footer">
+    <a href="https://www.espn.com/nhl/game/_/gameId/${game.id}" target="_blank">ESPN Game Page</a>
+    <a class="primary" href="https://www.espn.com/nhl/scoreboard" target="_blank">Scores</a>
+  </div>
+</div>`;
+}
+
+// ── DOM helpers: patch frac cells after lazy load ─────────────────
+function updatePlayerFracs(playerId) {
+  const stats = playerStatsCache[playerId];
+  if (!stats || stats.failed) return;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val ?? '—'; };
+  set(`sg-${playerId}`,   stats.sG);    set(`cg-${playerId}`,   stats.cG);
+  set(`sa-${playerId}`,   stats.sA);    set(`ca-${playerId}`,   stats.cA);
+  set(`spts-${playerId}`, stats.sPTS);  set(`cpts-${playerId}`, stats.cPTS);
+}
+
+// Called after both fetchPlayerStats + fetchPtsRolling resolve on hover
+function onStatsLoaded(el, playerId, goalieMode) {
+  updatePlayerFracs(playerId);
+  // Also update goalie stat line in case it was still "Loading…"
+  if (goalieMode) {
+    const gsEl = document.getElementById(`gs-${playerId}`);
+    if (gsEl) gsEl.textContent = goalieStatsLine(playerStatsCache[playerId]);
+  }
+  showTooltip(el, playerId, goalieMode);
+}
+
+// ── Player name tooltip ───────────────────────────────────────────
+function formatDOB(ds) {
+  if (!ds) return '';
+  const [y, m, d] = ds.split('-');
+  return `${m}/${d}/${y}`;
+}
+
+function showTooltip(el, playerId, goalieMode) {
+  const tip    = document.getElementById('player-tooltip');
+  const stats  = playerStatsCache[playerId];
+  const recent = ptsRollingCache[playerId];
+  const dobStr = stats?.dob ? formatDOB(stats.dob) : '—';
+  const sGP    = stats?.sGP  ?? '—';  const cGP  = stats?.cGP  ?? '—';
+
+  const ptsHtml = (recent && !recent.failed && recent.lastPts?.length)
+    ? `<span class="tooltip-hits">${recent.lastPts.map(p => `<span class="tooltip-hit">${p}</span>`).join('')}</span>`
+    : '';
+
+  // Use isGoalie flag set from roster data — more reliable than checking sW
+  const isGoalie = stats?.isGoalie || goalieMode;
+
+  if (isGoalie && stats?.sW != null) {
+    // Goalie tooltip: DOB | season GP / career GP | GAA / SV%
+    tip.innerHTML =
+      `<span class="tooltip-dob">${dobStr}</span>` +
+      `<span class="tooltip-frac"><span class="tn">${sGP}</span><span class="td">${cGP}</span></span>` +
+      (stats.sGAA ? `<span class="tooltip-frac"><span class="tn">${stats.sGAA}</span><span class="td">GAA</span></span>` : '') +
+      (stats.sSVP ? `<span class="tooltip-frac"><span class="tn">${stats.sSVP}</span><span class="td">SV%</span></span>` : '');
+  } else {
+    // Skater tooltip: DOB | season GP / career GP | last 3 game pts
+    tip.innerHTML =
+      `<span class="tooltip-dob">${dobStr}</span>` +
+      `<span class="tooltip-frac"><span class="tn">${sGP}</span><span class="td">${cGP}</span></span>` +
+      ptsHtml;
+  }
+
+  const rect = el.getBoundingClientRect();
+  tip.style.left = rect.left + 'px';
+  tip.style.top  = '-9999px';
+  tip.classList.add('visible');
+  const tipH = tip.getBoundingClientRect().height;
+  tip.style.top = (rect.top - tipH - 4) + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('player-tooltip').classList.remove('visible');
+}
+
+// ── PTS rolling tooltip (on PTS fraction hover) ───────────────────
+function showPtsRolling(el, playerId) {
+  const tip    = document.getElementById('pts-rolling-tooltip');
+  const recent = ptsRollingCache[playerId];
+  if (!recent || recent.failed) return;
+
+  // Season PPG and career PPG from gamelog totals
+  const sPPG = recent.seasonGP  > 0 ? (recent.seasonPts  / recent.seasonGP ).toFixed(2) : '—';
+  const cPPG = recent.careerGP  > 0 ? (recent.careerPts  / recent.careerGP ).toFixed(2) : '—';
+
+  const fracHtml = sPPG === '—' ? '' :
+    cPPG !== '—'
+      ? `<span class="tooltip-frac"><span class="tn">${sPPG}</span><span class="td">${cPPG}</span></span><span class="hat-sep">PPG</span>`
+      : `<span class="tooltip-frac"><span class="tn">${sPPG}</span><span class="td">PPG</span></span>`;
+
+  tip.innerHTML = fracHtml +
+    `<span class="hat-recent">${recent.l7} / ${recent.l15} / ${recent.l30}</span>`;
+
+  tip.style.top  = '-9999px';
+  tip.style.left = '-9999px';
+  tip.classList.add('visible');
+  const rect    = el.getBoundingClientRect();
+  const tipRect = tip.getBoundingClientRect();
+  tip.style.left = Math.max(4, rect.left + rect.width / 2 - tipRect.width / 2) + 'px';
+  tip.style.top  = (rect.top - tipRect.height - 4) + 'px';
+}
+
+function hidePtsRolling() {
+  document.getElementById('pts-rolling-tooltip').classList.remove('visible');
+}
+
+// ── Shots tooltip (on G fraction hover) ──────────────────────────
+function showShotsTooltip(el, playerId) {
+  const tip    = document.getElementById('shots-avg-tooltip');
+  const stats  = playerStatsCache[playerId];
+  const recent = ptsRollingCache[playerId];
+  if (!stats) return;
+
+  // Season shots/game — prefer gamelog totals (same source as ESPN's regular-season row)
+  // Career shots/game — from the common/v3 stats endpoint career totals
+  const sesShots = (recent && !recent.failed && recent.seasonGP > 0)
+    ? recent.seasonShots
+    : +stats.sSOG || 0;
+  const sesGP    = (recent && !recent.failed && recent.seasonGP > 0)
+    ? recent.seasonGP
+    : +stats.sGP || 0;
+  // Career: prefer gamelog-summed totals across all regular seasons; fall back to stats API
+  const cGP  = (recent?.careerGP  > 0) ? recent.careerGP  : (+stats.cGP  || 0);
+  const cSOG = (recent?.careerGP  > 0) ? recent.careerShots : (+stats.cSOG || 0);
+
+  // Shots per game as fraction: season / career
+  const sSpG = sesGP > 0 ? (sesShots / sesGP).toFixed(1) : '—';
+  const cSpG = (cGP > 0 && cSOG > 0) ? (cSOG / cGP).toFixed(1) : '—';
+
+  // Last 5 game shots as hit-style boxes
+  const shotsHtml = (recent && !recent.failed && recent.lastShots?.length)
+    ? `<span class="tooltip-hits">${recent.lastShots.map(s => `<span class="tooltip-hit">${s}</span>`).join('')}</span>`
+    : '';
+
+  const fracHtml = sSpG === '—' ? '' :
+    cSpG !== '—'
+      ? `<span class="tooltip-frac"><span class="tn">${sSpG}</span><span class="td">${cSpG}</span></span><span class="hat-sep">S/GP</span>`
+      : `<span class="tooltip-frac"><span class="tn">${sSpG}</span><span class="td">S/GP</span></span>`;
+
+  tip.innerHTML = fracHtml + shotsHtml;
+
+  tip.style.top  = '-9999px';
+  tip.style.left = '-9999px';
+  tip.classList.add('visible');
+  const rect    = el.getBoundingClientRect();
+  const tipRect = tip.getBoundingClientRect();
+  tip.style.left = Math.max(4, rect.left + rect.width / 2 - tipRect.width / 2) + 'px';
+  tip.style.top  = (rect.top - tipRect.height - 4) + 'px';
+}
+
+function hideShotsTooltip() {
+  document.getElementById('shots-avg-tooltip').classList.remove('visible');
+}
+
+// ── Calendar ──────────────────────────────────────────────────────
+let calViewDate = new Date();
+
+function toggleCalendar(e) {
+  e.stopPropagation();
+  const cal = document.getElementById('calendar-dropdown');
+  if (cal.classList.contains('open')) { closeCalendar(); return; }
+  const label = document.getElementById('date-display');
+  const rect  = label.getBoundingClientRect();
+  cal.style.top  = (rect.bottom + 8) + 'px';
+  cal.style.left = Math.max(8, Math.round(rect.left + rect.width / 2 - 150)) + 'px';
+  calViewDate = new Date(currentDate);
+  renderCalendar();
+  cal.classList.add('open');
+}
+
+function closeCalendar() {
+  document.getElementById('calendar-dropdown').classList.remove('open');
+}
+
+function calShiftMonth(delta, e) {
+  e.stopPropagation();
+  calViewDate = new Date(calViewDate.getFullYear(), calViewDate.getMonth() + delta, 1);
+  renderCalendar();
+}
+
+function selectCalDay(year, month, day, e) {
+  e.stopPropagation();
+  currentDate = new Date(year, month, day);
+  updateDateDisplay();
+  closeCalendar();
+  loadLineups();
+}
+
+function renderCalendar() {
+  const cal         = document.getElementById('calendar-dropdown');
+  const year        = calViewDate.getFullYear();
+  const month       = calViewDate.getMonth();
+  const monthLabel  = calViewDate.toLocaleDateString('en-US', { month:'long', year:'numeric' });
+  const todayStr    = formatDate(new Date());
+  const selectedStr = formatDate(currentDate);
+  const firstDay    = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const dows        = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+  const dowHtml     = dows.map(d => `<div class="cal-dow">${d}</div>`).join('');
+  let dayHtml = '';
+  for (let i = 0; i < firstDay; i++) dayHtml += `<div class="cal-day empty"></div>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds  = formatDate(new Date(year, month, d));
+    const cls = ['cal-day', ds === todayStr ? 'today' : '', ds === selectedStr ? 'selected' : ''].filter(Boolean).join(' ');
+    dayHtml  += `<div class="${cls}" onclick="selectCalDay(${year},${month},${d},event)">${d}</div>`;
+  }
+  cal.innerHTML = `
+    <div class="cal-header">
+      <button class="cal-nav-btn" onclick="calShiftMonth(-1,event)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div class="cal-month-label">${monthLabel}</div>
+      <button class="cal-nav-btn" onclick="calShiftMonth(1,event)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+    <div class="cal-grid">${dowHtml}${dayHtml}</div>`;
+}
+
+
+
+</script>
+
+<div class="calendar-dropdown" id="calendar-dropdown"></div>
+<div class="player-tooltip" id="player-tooltip"></div>
+<div class="hit-avg-tooltip" id="pts-rolling-tooltip"></div>
+<div class="hit-avg-tooltip" id="shots-avg-tooltip"></div>
+
+</body>
+</html>
