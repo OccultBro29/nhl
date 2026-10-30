@@ -180,12 +180,6 @@
   .lineup-status-subhead:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
   .lineup-status-player { font-size: 11px; color: var(--text); padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lineup-status-player .inj-note { color: #b45309; font-size: 10px; margin-left: 3px; font-style: italic; }
-  .lineup-status-loading { font-size: 11px; color: var(--text-light); font-style: italic; }
-  .proj-loading-bar { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); padding: 6px 14px; background: #f4ebdd; border-top: 1px solid var(--border); }
-  .proj-loading-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--navy); opacity: 0.4; animation: proj-blink 1.2s ease-in-out infinite; }
-  .proj-loading-dot:nth-child(2) { animation-delay: 0.2s; }
-  .proj-loading-dot:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes proj-blink { 0%,80%,100%{opacity:0.2} 40%{opacity:1} }
 
   /* ── Diagnostics panel ── */
 
@@ -291,53 +285,79 @@ function reorderByProjection(espnPlayers, projectedNames) {
 }
 
 async function fetchProjections() {
+  const NHL_URL = 'https://www.nhl.com/news/nhl-lineup-projections-2026-27-season';
+  const ABBREVS = 'UTA=Utah Mammoth, PIT=Pittsburgh Penguins, WPG=Winnipeg Jets, TB=Tampa Bay Lightning, CBJ=Columbus Blue Jackets, CAR=Carolina Hurricanes, CHI=Chicago Blackhawks, DET=Detroit Red Wings, WSH=Washington Capitals, NSH=Nashville Predators, BOS=Boston Bruins, STL=St. Louis Blues, CGY=Calgary Flames, EDM=Edmonton Oilers, TOR=Toronto Maple Leafs, VAN=Vancouver Canucks, SEA=Seattle Kraken, ANA=Anaheim Ducks, LA=Los Angeles Kings, SJS=San Jose Sharks, DAL=Dallas Stars, COL=Colorado Avalanche, MIN=Minnesota Wild, VGK=Vegas Golden Knights, NYR=New York Rangers, NYI=New York Islanders, NJ=New Jersey Devils, PHI=Philadelphia Flyers, OTT=Ottawa Senators, MTL=Montreal Canadiens, BUF=Buffalo Sabres, FLA=Florida Panthers';
+  const PROMPT = 'Call get_lineups to fetch the NHL lineup projections article text, then return ONLY this JSON with no backticks or prose:\n{"teams":{"ABBREV":{"forwards":["Name"],"defense":["Name"],"startingGoalie":"Name","backupGoalie":"Name","scratched":["Name"],"injured":[{"name":"Name","injury":"reason"}]}}}\nESPN abbreviations: ' + ABBREVS + '\nRules: forward lines have 3 players joined by " -- "; D pairs have 2; goalies listed individually (first = startingGoalie, second = backupGoalie); include ALL teams in the article; parse scratched/injured from their labeled lines. Return ONLY the JSON object.';
+
+  async function fetchArticle() {
+    const proxies = [
+      'https://api.allorigins.win/raw?url=' + encodeURIComponent(NHL_URL),
+      'https://corsproxy.io/?' + encodeURIComponent(NHL_URL),
+    ];
+    for (const proxy of proxies) {
+      try {
+        const r = await fetch(proxy);
+        if (!r.ok) continue;
+        const html = await r.text();
+        if (!html || html.length < 500) continue;
+        return html
+          .replace(/<\/p>|<\/h\d>|<\/li>|<br\s*\/?>/gi, '\n')
+          .replace(/<[^>]+>/g, '')
+          .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+          .replace(/\u00a0/g, ' ').replace(/\r/g, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .substring(0, 22000);
+      } catch(e) { continue; }
+    }
+    return null;
+  }
+
+  // Primary: sample capability (published artifact)
+  try {
+    if (typeof claude !== 'undefined') {
+      const sampleFn = await claude.use('sample');
+      if (sampleFn) {
+        const result = await sampleFn.json(PROMPT, {
+          tools: [{ name: 'get_lineups', description: 'Fetches the NHL lineup projections article from NHL.com via a CORS proxy', execute: fetchArticle }]
+        });
+        if (result && result.teams) {
+          Object.assign(projectionData, result.teams);
+          console.log('[projections] loaded via sample:', Object.keys(projectionData).join(', '));
+          return;
+        }
+      }
+    }
+  } catch(e) {
+    if (!e || e.code !== 'rate_limited') console.warn('[projections] sample:', e ? (e.message || e) : 'unknown');
+  }
+
+  // Fallback: Anthropic API direct (works in chat preview only)
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 3000,
-        system: 'Return ONLY valid JSON. No markdown, no backticks, no prose—just the raw JSON object.',
+        model: 'claude-sonnet-4-6', max_tokens: 3000,
+        system: 'Return ONLY valid compact JSON. No markdown, no backticks, no prose.',
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        messages: [{
-          role: 'user',
-          content: `Fetch and parse today's NHL lineup projections from:
-https://www.nhl.com/news/nhl-lineup-projections-2026-27-season
-
-Return ONLY a JSON object (no markdown, no backticks):
-{"teams":{"ABBREV":{"forwards":["Name",...],"defense":["Name",...],"startingGoalie":"Name","backupGoalie":"Name","scratched":["Name",...],"injured":[{"name":"Name","injury":"description"},...]}}
-
-ESPN abbreviations:
-UTA=Utah Mammoth, PIT=Pittsburgh Penguins, WPG=Winnipeg Jets, TB=Tampa Bay Lightning,
-CBJ=Columbus Blue Jackets, CAR=Carolina Hurricanes, CHI=Chicago Blackhawks, DET=Detroit Red Wings,
-WSH=Washington Capitals, NSH=Nashville Predators, BOS=Boston Bruins, STL=St. Louis Blues,
-CGY=Calgary Flames, EDM=Edmonton Oilers, TOR=Toronto Maple Leafs, VAN=Vancouver Canucks,
-SEA=Seattle Kraken, ANA=Anaheim Ducks, LA=Los Angeles Kings, SJS=San Jose Sharks,
-DAL=Dallas Stars, COL=Colorado Avalanche, MIN=Minnesota Wild, VGK=Vegas Golden Knights,
-NYR=New York Rangers, NYI=New York Islanders, NJ=New Jersey Devils, PHI=Philadelphia Flyers,
-OTT=Ottawa Senators, MTL=Montreal Canadiens, BUF=Buffalo Sabres, FLA=Florida Panthers
-
-For each team:
-- forwards = all skaters on forward lines (not D or G), listed in order as they appear
-- defense  = all defensemen on D pairs, listed in order
-- startingGoalie = first goalie name listed for that team
-- backupGoalie   = second goalie name listed
-- scratched = names after "Scratched:" line (no position labels)
-- injured   = names after "Injured:" line, injury in parentheses if present`
-        }]
+        messages: [{ role: 'user', content: 'Fetch ' + NHL_URL + ' and return: {"teams":{"ABBREV":{"forwards":[...],"defense":[...],"startingGoalie":"Name","backupGoalie":"Name","scratched":[...],"injured":[{"name":"Name","injury":"reason"}]}}}. ' + ABBREVS + '. ONLY JSON.' }]
       })
     });
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-    if (!text) return;
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return;
-    const parsed = JSON.parse(m[0]);
-    if (parsed.teams) Object.assign(projectionData, parsed.teams);
+    if (resp.ok) {
+      const data = await resp.json();
+      const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+      const m = text.match(/\{[\s\S]*\}/);
+      if (m) {
+        const parsed = JSON.parse(m[0]);
+        if (parsed && parsed.teams) {
+          Object.assign(projectionData, parsed.teams);
+          console.log('[projections] loaded via API:', Object.keys(projectionData).join(', '));
+        }
+      }
+    }
   } catch(e) {
-    console.warn('[projections] fetch error:', e.message);
+    console.warn('[projections] API fallback:', e ? (e.message || e) : 'unknown');
   }
 }
 
@@ -758,7 +778,6 @@ async function loadLineups() {
   status.className = 'status-bar';
   status.textContent = 'Fetching schedule…';
 
-  // Reset projections and start fetching them immediately (runs in parallel)
   projectionData = {};
   const projPromise = fetchProjections();
 
@@ -782,13 +801,15 @@ async function loadLineups() {
     grid.innerHTML = games.map((g, i) => skeletonCard(g, i)).join('');
     status.textContent = `Found ${games.length} game${games.length !== 1 ? 's' : ''}. Loading rosters & projections…`;
 
-    // Each game waits for its rosters AND the shared projections promise before rendering.
+    // Each game fetches only its own 2 rosters and renders independently.
+    // Games whose rosters are already cached appear instantly; others trickle in
+    // without blocking each other or hammering the proxy all at once.
     let loaded = 0;
     await Promise.all(games.map(async (game, i) => {
       await Promise.all([
         fetchRoster(game.awayTeam.abbrev),
         fetchRoster(game.homeTeam.abbrev),
-        projPromise,   // wait for NHL.com projections (shared; resolved once)
+        projPromise,
       ]);
 
       // Swap skeleton for the real card
@@ -916,53 +937,50 @@ function buildStatusSection(away, home) {
   const hp = projectionData[home.abbrev];
   if (!ap && !hp) return '';
 
-  const teamCol = (proj, team) => {
+  function teamCol(proj, team) {
     if (!proj) return '<div class="lineup-status-col"></div>';
-    const sc = (proj.scratched || []);
-    const inj = (proj.injured || []);
+    const sc  = proj.scratched || [];
+    const inj = proj.injured   || [];
     if (!sc.length && !inj.length) return '<div class="lineup-status-col"></div>';
+    const scHtml  = sc.length  ? `<div class="lineup-status-subhead">Scratched</div>${sc.map(n => `<div class="lineup-status-player">${n}</div>`).join('')}` : '';
+    const injHtml = inj.length ? `<div class="lineup-status-subhead">Injured</div>${inj.map(p => `<div class="lineup-status-player">${p.name}${p.injury ? ` <span class="inj-note">(${p.injury})</span>` : ''}</div>`).join('')}` : '';
     return `<div class="lineup-status-col">
       <div class="lineup-status-header">
         <img src="${team.logo}" onerror="this.style.display='none'" alt="${team.abbrev}">
         ${team.abbrev}
       </div>
-      ${sc.length ? `<div class="lineup-status-subhead">Scratched</div>
-        ${sc.map(n => `<div class="lineup-status-player">${n}</div>`).join('')}` : ''}
-      ${inj.length ? `<div class="lineup-status-subhead">Injured</div>
-        ${inj.map(p => `<div class="lineup-status-player">${p.name}${p.injury ? `<span class="inj-note">(${p.injury})</span>` : ''}</div>`).join('')}` : ''}
+      ${scHtml}${injHtml}
     </div>`;
-  };
+  }
 
-  const awayCol = teamCol(ap, away);
-  const homeCol = teamCol(hp, home);
-  if (awayCol === '<div class="lineup-status-col"></div>' && homeCol === '<div class="lineup-status-col"></div>') return '';
-
-  return `<div class="lineup-status">
-    <div class="lineup-status-grid">${awayCol}${homeCol}</div>
-  </div>`;
+  const ac = teamCol(ap, away);
+  const hc = teamCol(hp, home);
+  const empty = '<div class="lineup-status-col"></div>';
+  if (ac === empty && hc === empty) return '';
+  return `<div class="lineup-status"><div class="lineup-status-grid">${ac}${hc}</div></div>`;
 }
 
 // ── Card builder ──────────────────────────────────────────────────
 function buildGameCard(game) {
   const away       = game.awayTeam;
   const home       = game.homeTeam;
-  const awayRoster = { ...(rosterCache[away.abbrev] || { forwards:[], defensemen:[], goalies:[] }) };
-  const homeRoster = { ...(rosterCache[home.abbrev] || { forwards:[], defensemen:[], goalies:[] }) };
+  const awayRoster = Object.assign({}, rosterCache[away.abbrev] || { forwards:[], defensemen:[], goalies:[] });
+  const homeRoster = Object.assign({}, rosterCache[home.abbrev] || { forwards:[], defensemen:[], goalies:[] });
 
-  // ── Apply NHL.com projection ordering ──
-  const ap = projectionData[away.abbrev];
-  const hp = projectionData[home.abbrev];
-  if (ap) {
-    const goalieOrder = [ap.startingGoalie, ap.backupGoalie].filter(Boolean);
-    awayRoster.forwards   = reorderByProjection(awayRoster.forwards,   ap.forwards  || []);
-    awayRoster.defensemen = reorderByProjection(awayRoster.defensemen, ap.defense   || []);
-    awayRoster.goalies    = reorderByProjection(awayRoster.goalies,    goalieOrder);
+  // Apply NHL.com projection ordering
+  const _ap = projectionData[away.abbrev];
+  const _hp = projectionData[home.abbrev];
+  if (_ap) {
+    const gOrder = [_ap.startingGoalie, _ap.backupGoalie].filter(Boolean);
+    awayRoster.forwards   = reorderByProjection(awayRoster.forwards,   _ap.forwards || []);
+    awayRoster.defensemen = reorderByProjection(awayRoster.defensemen, _ap.defense  || []);
+    awayRoster.goalies    = reorderByProjection(awayRoster.goalies,    gOrder);
   }
-  if (hp) {
-    const goalieOrder = [hp.startingGoalie, hp.backupGoalie].filter(Boolean);
-    homeRoster.forwards   = reorderByProjection(homeRoster.forwards,   hp.forwards  || []);
-    homeRoster.defensemen = reorderByProjection(homeRoster.defensemen, hp.defense   || []);
-    homeRoster.goalies    = reorderByProjection(homeRoster.goalies,    goalieOrder);
+  if (_hp) {
+    const gOrder = [_hp.startingGoalie, _hp.backupGoalie].filter(Boolean);
+    homeRoster.forwards   = reorderByProjection(homeRoster.forwards,   _hp.forwards || []);
+    homeRoster.defensemen = reorderByProjection(homeRoster.defensemen, _hp.defense  || []);
+    homeRoster.goalies    = reorderByProjection(homeRoster.goalies,    gOrder);
   }
 
   const isLive  = game.statusState === 'in';
