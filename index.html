@@ -286,78 +286,155 @@ function reorderByProjection(espnPlayers, projectedNames) {
 
 async function fetchProjections() {
   const NHL_URL = 'https://www.nhl.com/news/nhl-lineup-projections-2026-27-season';
-  const ABBREVS = 'UTA=Utah Mammoth, PIT=Pittsburgh Penguins, WPG=Winnipeg Jets, TB=Tampa Bay Lightning, CBJ=Columbus Blue Jackets, CAR=Carolina Hurricanes, CHI=Chicago Blackhawks, DET=Detroit Red Wings, WSH=Washington Capitals, NSH=Nashville Predators, BOS=Boston Bruins, STL=St. Louis Blues, CGY=Calgary Flames, EDM=Edmonton Oilers, TOR=Toronto Maple Leafs, VAN=Vancouver Canucks, SEA=Seattle Kraken, ANA=Anaheim Ducks, LA=Los Angeles Kings, SJS=San Jose Sharks, DAL=Dallas Stars, COL=Colorado Avalanche, MIN=Minnesota Wild, VGK=Vegas Golden Knights, NYR=New York Rangers, NYI=New York Islanders, NJ=New Jersey Devils, PHI=Philadelphia Flyers, OTT=Ottawa Senators, MTL=Montreal Canadiens, BUF=Buffalo Sabres, FLA=Florida Panthers';
-  const PROMPT = 'Call get_lineups to fetch the NHL lineup projections article text, then return ONLY this JSON with no backticks or prose:\n{"teams":{"ABBREV":{"forwards":["Name"],"defense":["Name"],"startingGoalie":"Name","backupGoalie":"Name","scratched":["Name"],"injured":[{"name":"Name","injury":"reason"}]}}}\nESPN abbreviations: ' + ABBREVS + '\nRules: forward lines have 3 players joined by " -- "; D pairs have 2; goalies listed individually (first = startingGoalie, second = backupGoalie); include ALL teams in the article; parse scratched/injured from their labeled lines. Return ONLY the JSON object.';
 
-  async function fetchArticle() {
-    const proxies = [
-      'https://api.allorigins.win/raw?url=' + encodeURIComponent(NHL_URL),
-      'https://corsproxy.io/?' + encodeURIComponent(NHL_URL),
+  // ── Step 1: fetch article text (try several CORS-friendly methods) ──
+  async function getArticleText() {
+    const attempts = [
+      // Jina AI reader: renders JS, returns clean text, CORS-open
+      { url: 'https://r.jina.ai/' + NHL_URL, isRaw: true },
+      // allOrigins raw proxy (works for SSR pages)
+      { url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(NHL_URL), isRaw: false },
+      // Direct (may be blocked by CORS)
+      { url: NHL_URL, isRaw: false },
     ];
-    for (const proxy of proxies) {
+    for (const { url, isRaw } of attempts) {
       try {
-        const r = await fetch(proxy);
+        const r = await fetch(url);
         if (!r.ok) continue;
-        const html = await r.text();
-        if (!html || html.length < 500) continue;
-        return html
-          .replace(/<\/p>|<\/h\d>|<\/li>|<br\s*\/?>/gi, '\n')
-          .replace(/<[^>]+>/g, '')
-          .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
-          .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-          .replace(/\u00a0/g, ' ').replace(/\r/g, '')
-          .replace(/\n{3,}/g, '\n\n')
-          .substring(0, 22000);
+        let text = await r.text();
+        if (!text || text.length < 800) continue;
+        // Strip HTML tags if needed
+        if (/<html|<div|<p[> ]/i.test(text)) {
+          text = text
+            .replace(/<\/p>|<\/h\d>|<\/li>|<br\s*\/?>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&amp;/g,'&').replace(/&nbsp;/g,' ')
+            .replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+            .replace(/\r/g,'').replace(/\n{3,}/g,'\n\n');
+        }
+        // Remove markdown bold/italic markers
+        text = text.replace(/\*{1,3}/g,'').replace(/_{1,2}/g,'').replace(/#+\s/g,'');
+        if (text.includes('projected lineup')) return text;
       } catch(e) { continue; }
     }
     return null;
   }
 
-  // Primary: sample capability (published artifact)
+  // ── Step 2: parse article text into projectionData ──────────────────
+  function parseArticle(text) {
+    const TEAMS = {
+      'mammoth':'UTA','utah':'UTA','penguins':'PIT','pittsburgh':'PIT',
+      'jets':'WPG','winnipeg':'WPG','lightning':'TB','tampa':'TB',
+      'blue jackets':'CBJ','columbus':'CBJ','hurricanes':'CAR','carolina':'CAR',
+      'blackhawks':'CHI','chicago':'CHI','red wings':'DET','detroit':'DET',
+      'capitals':'WSH','washington':'WSH','predators':'NSH','nashville':'NSH',
+      'bruins':'BOS','boston':'BOS','blues':'STL','louis':'STL',
+      'flames':'CGY','calgary':'CGY','oilers':'EDM','edmonton':'EDM',
+      'maple leafs':'TOR','toronto':'TOR','canucks':'VAN','vancouver':'VAN',
+      'kraken':'SEA','seattle':'SEA','ducks':'ANA','anaheim':'ANA',
+      'kings':'LA','angeles':'LA','sharks':'SJS','jose':'SJS',
+      'stars':'DAL','dallas':'DAL','avalanche':'COL','colorado':'COL',
+      'wild':'MIN','minnesota':'MIN','golden knights':'VGK','vegas':'VGK',
+      'rangers':'NYR','islanders':'NYI','devils':'NJ','jersey':'NJ',
+      'flyers':'PHI','philadelphia':'PHI','senators':'OTT','ottawa':'OTT',
+      'canadiens':'MTL','montreal':'MTL','sabres':'BUF','buffalo':'BUF',
+      'panthers':'FLA','florida':'FLA',
+    };
+    function abbrev(name) {
+      const lo = name.toLowerCase();
+      for (const [k,v] of Object.entries(TEAMS)) if (k.includes(' ') && lo.includes(k)) return v;
+      for (const w of lo.split(/\W+/)) if (TEAMS[w]) return TEAMS[w];
+      return null;
+    }
+
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const result = {};
+    let cur = null, seenD = false;
+
+    for (const raw of lines) {
+      const line = raw.replace(/[\[\]]/g,'').trim();
+      if (line.length < 3) continue;
+
+      // "Team projected lineup" header
+      const hm = line.match(/^(.+?)\s+projected\s+lineup/i);
+      if (hm) {
+        const ab = abbrev(hm[1]);
+        if (ab) {
+          result[ab] = { forwards:[], defense:[], startingGoalie:'', backupGoalie:'', scratched:[], injured:[] };
+          cur = result[ab]; seenD = false;
+        }
+        continue;
+      }
+      if (!cur) continue;
+
+      // Scratched
+      if (/^scratched[:\s]/i.test(line)) {
+        cur.scratched = line.replace(/^scratched[:\s]*/i,'').split(',').map(s=>s.trim()).filter(Boolean);
+        continue;
+      }
+      // Injured
+      if (/^injured[:\s]/i.test(line)) {
+        cur.injured = line.replace(/^injured[:\s]*/i,'')
+          .split(/,(?![^(]*\))/).map(s => {
+            const m = s.trim().match(/^([^(]+?)(?:\s*\(([^)]+)\))?$/);
+            return m ? { name:m[1].trim(), injury:m[2]||'' } : { name:s.trim(), injury:'' };
+          }).filter(p => p.name.length > 1);
+        continue;
+      }
+
+      // Player lines with --
+      if (line.includes('--')) {
+        const players = line.split(/\s*--\s*/).map(p=>p.trim())
+          .filter(p => p && /^[A-Z][a-z]/.test(p) && p.includes(' '));
+        if (players.length === 3) { cur.forwards.push(...players); seenD = false; }
+        else if (players.length === 2) { cur.defense.push(...players); seenD = true; }
+        continue;
+      }
+
+      // Single name after defense = goalie
+      if (seenD && /^[A-Z][a-z]+(?:\s+[A-Z][a-z'-]+){1,2}$/.test(line)) {
+        if (!cur.startingGoalie) cur.startingGoalie = line;
+        else if (!cur.backupGoalie) cur.backupGoalie = line;
+      }
+    }
+    return result;
+  }
+
+  // ── Try fetch + local parse ──────────────────────────────────────────
   try {
-    if (typeof claude !== 'undefined') {
-      const sampleFn = await claude.use('sample');
+    const text = await getArticleText();
+    if (text) {
+      const parsed = parseArticle(text);
+      const keys = Object.keys(parsed);
+      if (keys.length > 0) {
+        Object.assign(projectionData, parsed);
+        console.log('[projections] parsed', keys.length, 'teams:', keys.join(', '));
+        return;
+      } else {
+        console.warn('[projections] page fetched but no teams parsed. Snippet:', text.substring(0, 300));
+      }
+    }
+  } catch(e) {
+    console.warn('[projections] fetch/parse error:', e.message);
+  }
+
+  // ── Fallback: sample capability (ask Claude directly) ───────────────
+  try {
+    if (window.claude) {
+      const sampleFn = await window.claude.use('sample');
       if (sampleFn) {
-        const result = await sampleFn.json(PROMPT, {
-          tools: [{ name: 'get_lineups', description: 'Fetches the NHL lineup projections article from NHL.com via a CORS proxy', execute: fetchArticle }]
-        });
+        const ABBREVS = 'UTA=Utah Mammoth, PIT=Pittsburgh Penguins, WPG=Winnipeg Jets, TB=Tampa Bay Lightning, CBJ=Columbus Blue Jackets, CAR=Carolina Hurricanes, CHI=Chicago Blackhawks, DET=Detroit Red Wings, WSH=Washington Capitals, NSH=Nashville Predators, BOS=Boston Bruins, STL=St. Louis Blues, CGY=Calgary Flames, EDM=Edmonton Oilers, TOR=Toronto Maple Leafs, VAN=Vancouver Canucks, SEA=Seattle Kraken, ANA=Anaheim Ducks, LA=Los Angeles Kings, SJS=San Jose Sharks, DAL=Dallas Stars, COL=Colorado Avalanche, MIN=Minnesota Wild, VGK=Vegas Golden Knights, NYR=New York Rangers, NYI=New York Islanders, NJ=New Jersey Devils, PHI=Philadelphia Flyers, OTT=Ottawa Senators, MTL=Montreal Canadiens, BUF=Buffalo Sabres, FLA=Florida Panthers';
+        const result = await sampleFn.json(
+          'What are today\'s NHL projected starting lineups from ' + NHL_URL + '? Return ONLY JSON: {"teams":{"ABBREV":{"forwards":["Name"],"defense":["Name"],"startingGoalie":"Name","backupGoalie":"Name","scratched":["Name"],"injured":[{"name":"Name","injury":"reason"}]}}}. Abbreviations: ' + ABBREVS + '. Include ALL teams. Return ONLY the JSON object.'
+        );
         if (result && result.teams) {
           Object.assign(projectionData, result.teams);
           console.log('[projections] loaded via sample:', Object.keys(projectionData).join(', '));
-          return;
         }
       }
     }
   } catch(e) {
-    if (!e || e.code !== 'rate_limited') console.warn('[projections] sample:', e ? (e.message || e) : 'unknown');
-  }
-
-  // Fallback: Anthropic API direct (works in chat preview only)
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6', max_tokens: 3000,
-        system: 'Return ONLY valid compact JSON. No markdown, no backticks, no prose.',
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        messages: [{ role: 'user', content: 'Fetch ' + NHL_URL + ' and return: {"teams":{"ABBREV":{"forwards":[...],"defense":[...],"startingGoalie":"Name","backupGoalie":"Name","scratched":[...],"injured":[{"name":"Name","injury":"reason"}]}}}. ' + ABBREVS + '. ONLY JSON.' }]
-      })
-    });
-    if (resp.ok) {
-      const data = await resp.json();
-      const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-      const m = text.match(/\{[\s\S]*\}/);
-      if (m) {
-        const parsed = JSON.parse(m[0]);
-        if (parsed && parsed.teams) {
-          Object.assign(projectionData, parsed.teams);
-          console.log('[projections] loaded via API:', Object.keys(projectionData).join(', '));
-        }
-      }
-    }
-  } catch(e) {
-    console.warn('[projections] API fallback:', e ? (e.message || e) : 'unknown');
+    console.warn('[projections] sample fallback:', e ? e.message : 'unknown');
   }
 }
 
