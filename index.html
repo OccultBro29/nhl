@@ -379,16 +379,18 @@ function parseLineupText(text) {
     }
 
     // Player lines: 3 = forward line, 2 = D pair
-    if (line.includes('--')) {
-      const players = line.split(/\s*--\s*/).map(p=>p.trim())
-        .filter(p => p && /^[A-Z][a-z]/.test(p) && p.includes(' '));
+    // Handle --, –, —, or multiple spaces as separators
+    const hasSep = line.includes('--') || line.includes('\u2013') || line.includes('\u2014');
+    if (hasSep) {
+      const players = line.split(/\s*(?:--|[\u2013\u2014])\s*/).map(p=>p.trim())
+        .filter(p => p && /^[A-Z]/.test(p) && p.length > 3);
       if (players.length === 3) { cur.forwards.push(...players); seenD = false; }
       else if (players.length === 2) { cur.defense.push(...players); seenD = true; }
       continue;
     }
 
     // Single name after D pairs = goalie
-    if (seenD && /^[A-Z][a-z]+(?:\s+[A-Z][a-z'\'\-]+){1,2}$/.test(line)) {
+    if (seenD && /^[A-Z][a-z]+(?:[\s\-'][A-Z]?[a-z]+)+$/.test(line) && !line.includes(',')) {
       if (!cur.startingGoalie) cur.startingGoalie = line;
       else if (!cur.backupGoalie) cur.backupGoalie = line;
     }
@@ -408,40 +410,59 @@ function closePasteModal() {
 function applyPastedLineups() {
   const text = document.getElementById('paste-textarea').value;
   const statusEl = document.getElementById('paste-status');
-  if (!text.trim()) { statusEl.textContent = 'Please paste some text first.'; statusEl.className = 'paste-modal-status err'; return; }
-  const parsed = parseLineupText(text);
-  const teams = Object.keys(parsed);
-  if (!teams.length) {
-    statusEl.textContent = 'Could not find any lineup data — make sure you copied the full page text.';
+
+  if (!text.trim()) {
+    statusEl.textContent = 'Please paste some text first.';
     statusEl.className = 'paste-modal-status err';
     return;
   }
+
+  const parsed = parseLineupText(text);
+  const teams = Object.keys(parsed);
+  console.log('[paste] parsed teams:', teams, parsed);
+
+  if (!teams.length) {
+    statusEl.innerHTML = 'No "projected lineup" sections found.<br>'
+      + '<small>Pasted text starts with: ' + text.substring(0, 120).replace(/</g,'&lt;').replace(/\n/g,' ') + '…</small>';
+    statusEl.className = 'paste-modal-status err';
+    return;
+  }
+
   Object.assign(projectionData, parsed);
-  statusEl.textContent = 'Found ' + teams.length + ' team' + (teams.length !== 1 ? 's' : '') + ': ' + teams.join(', ');
-  statusEl.className = 'paste-modal-status ok';
-  // Re-render all game cards with projection ordering applied
-  setTimeout(() => {
-    closePasteModal();
-    allGames.forEach(game => {
-      // Cards may be skeletons (id=game-slot-N) or rendered (data-away/data-home)
-      const sel = `.game-card[data-away="${game.awayTeam.abbrev}"][data-home="${game.homeTeam.abbrev}"]`;
-      const card = document.querySelector(sel);
-      if (card) {
-        card.outerHTML = buildGameCard(game);
-        // Re-apply cached stats to the freshly rendered card
-        const roster = abbrev => rosterCache[abbrev] || { forwards:[], defensemen:[], goalies:[] };
-        const allPlayers = [
-          ...roster(game.awayTeam.abbrev).forwards, ...roster(game.awayTeam.abbrev).defensemen,
-          ...roster(game.homeTeam.abbrev).forwards, ...roster(game.homeTeam.abbrev).defensemen,
-        ];
-        allPlayers.forEach(p => updatePlayerFracs(p.id));
-        [...roster(game.awayTeam.abbrev).goalies, ...roster(game.homeTeam.abbrev).goalies].slice(0,4).forEach(g => {
-          const el = document.getElementById('gs-' + g.id);
-          if (el && playerStatsCache[g.id]) el.textContent = goalieStatsLine(playerStatsCache[g.id]);
-        });
-      }
+
+  // Re-render the entire games grid (most reliable approach)
+  const grid = document.getElementById('games-grid');
+  if (grid && allGames.length) {
+    grid.innerHTML = allGames.map(game => buildGameCard(game)).join('');
+
+    // Re-apply all cached player stats
+    Object.values(rosterCache).forEach(r => {
+      [...(r.forwards||[]), ...(r.defensemen||[])].forEach(p => {
+        if (playerStatsCache[p.id]) updatePlayerFracs(p.id);
+      });
+      (r.goalies||[]).forEach(g => {
+        const el = document.getElementById('gs-' + g.id);
+        if (el && playerStatsCache[g.id]) el.textContent = goalieStatsLine(playerStatsCache[g.id]);
+      });
     });
-  }, 600);
+
+    filterGames(); // re-apply any active team filter
+  }
+
+  const gameTeams = new Set(allGames.flatMap(g => [g.awayTeam.abbrev, g.homeTeam.abbrev]));
+  const matched = teams.filter(t => gameTeams.has(t));
+  const extra   = teams.filter(t => !gameTeams.has(t));
+
+  statusEl.innerHTML =
+    (matched.length
+      ? '✓ Lineups applied for: <strong>' + matched.join(', ') + '</strong>'
+      : '⚠️ Parsed ' + teams.join(', ') + ' but none match today\'s games')
+    + (extra.length ? '<br><small>Also parsed (not in today\'s schedule): ' + extra.join(', ') + '</small>' : '');
+  statusEl.className = matched.length ? 'paste-modal-status ok' : 'paste-modal-status err';
+
+  // Update button text to confirm success
+  const applyBtn = document.querySelector('.paste-modal-btns button.primary');
+  if (applyBtn && matched.length) applyBtn.textContent = '✓ Applied';
 }
 
 async function fetchProjections() {
@@ -1460,7 +1481,7 @@ function renderCalendar() {
       <textarea id="paste-textarea" placeholder="Paste the full page text here…"></textarea>
       <div class="paste-modal-status" id="paste-status"></div>
       <div class="paste-modal-btns">
-        <button onclick="closePasteModal()">Cancel</button>
+        <button onclick="closePasteModal()">Close</button>
         <button class="primary" onclick="applyPastedLineups()">Apply Lineups</button>
       </div>
     </div>
