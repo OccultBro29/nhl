@@ -170,16 +170,11 @@
 
   .tbd-roster { color: var(--text-light); font-style: italic; font-size: 12px; padding: 8px 0; text-align: center; }
 
-  /* ── Lineup status report (scratched / injured) ── */
-  .lineup-status { border-top: 1px solid var(--border); padding: 10px 14px; background: #f4ebdd; }
-  .lineup-status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .lineup-status-col { min-width: 0; }
-  .lineup-status-header { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-light); margin-bottom: 5px; display: flex; align-items: center; gap: 5px; }
-  .lineup-status-header img { width: 14px; height: 14px; object-fit: contain; }
-  .lineup-status-subhead { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.7px; color: var(--text-muted); margin: 5px 0 3px; padding-top: 4px; border-top: 1px solid #eee8e0; }
-  .lineup-status-subhead:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
-  .lineup-status-player { font-size: 11px; color: var(--text); padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .lineup-status-player .inj-note { color: #b45309; font-size: 10px; margin-left: 3px; font-style: italic; }
+  /* ── Scratched / Injured inline labels ── */
+  .pos-group-label.scratched { color: #92400e; }
+  .pos-group-label.injured   { color: #b91c1c; }
+  .player-inj-note { font-size: 10px; color: #b45309; font-style: italic; margin-left: 4px; opacity: 0.85; }
+  .roster-player.out { opacity: 0.55; }
 
 
   .paste-lineup-btn { display:inline-flex; align-items:center; gap:6px; background:#f4ebdd; color:var(--navy); border:1.5px solid var(--border); padding:8px 14px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; transition:background 0.15s; }
@@ -1063,41 +1058,17 @@ function updateFilterBtn(checked, total) {
   btn.innerHTML = label + ' <span class="multi-select-arrow">▾</span>';
 }
 
-// ── Status report section ─────────────────────────────────────────
-function buildStatusSection(away, home) {
-  const ap = projectionData[away.abbrev];
-  const hp = projectionData[home.abbrev];
-  if (!ap && !hp) return '';
-
-  function teamCol(proj, team) {
-    if (!proj) return '<div class="lineup-status-col"></div>';
-    const sc  = proj.scratched || [];
-    const inj = proj.injured   || [];
-    if (!sc.length && !inj.length) return '<div class="lineup-status-col"></div>';
-    const scHtml  = sc.length  ? `<div class="lineup-status-subhead">Scratched</div>${sc.map(n => `<div class="lineup-status-player">${n}</div>`).join('')}` : '';
-    const injHtml = inj.length ? `<div class="lineup-status-subhead">Injured</div>${inj.map(p => `<div class="lineup-status-player">${p.name}${p.injury ? ` <span class="inj-note">(${p.injury})</span>` : ''}</div>`).join('')}` : '';
-    return `<div class="lineup-status-col">
-      <div class="lineup-status-header">
-        <img src="${team.logo}" onerror="this.style.display='none'" alt="${team.abbrev}">
-        ${team.abbrev}
-      </div>
-      ${scHtml}${injHtml}
-    </div>`;
-  }
-
-  const ac = teamCol(ap, away);
-  const hc = teamCol(hp, home);
-  const empty = '<div class="lineup-status-col"></div>';
-  if (ac === empty && hc === empty) return '';
-  return `<div class="lineup-status"><div class="lineup-status-grid">${ac}${hc}</div></div>`;
-}
 
 // ── Card builder ──────────────────────────────────────────────────
 function buildGameCard(game) {
   const away       = game.awayTeam;
   const home       = game.homeTeam;
-  const awayRoster = Object.assign({}, rosterCache[away.abbrev] || { forwards:[], defensemen:[], goalies:[] });
-  const homeRoster = Object.assign({}, rosterCache[home.abbrev] || { forwards:[], defensemen:[], goalies:[] });
+  const _deepCopy = ab => {
+    const r = rosterCache[ab] || { forwards:[], defensemen:[], goalies:[] };
+    return { forwards:[...r.forwards], defensemen:[...r.defensemen], goalies:[...r.goalies], _scratched:[], _injured:[] };
+  };
+  const awayRoster = _deepCopy(away.abbrev);
+  const homeRoster = _deepCopy(home.abbrev);
 
   // Apply NHL.com projection ordering
   const _ap = projectionData[away.abbrev];
@@ -1114,6 +1085,34 @@ function buildGameCard(game) {
     homeRoster.defensemen = reorderByProjection(homeRoster.defensemen, _hp.defense  || []);
     homeRoster.goalies    = reorderByProjection(homeRoster.goalies,    gOrder);
   }
+
+  // Extract scratched/injured players out of roster arrays into their own groups
+  function _extract(arrays, entries) {
+    return (entries || []).map(entry => {
+      const rawName = typeof entry === 'string' ? entry : (entry.name || '');
+      const note    = typeof entry === 'string' ? '' : (entry.injury || '');
+      if (!rawName) return null;
+      const nl = lastN(rawName), nf = normName(rawName);
+      for (const arr of arrays) {
+        const idx = arr.findIndex(p => {
+          const en = normName(playerName(p)), el = lastN(playerName(p));
+          return en === nf || el === nl;
+        });
+        if (idx >= 0) {
+          const [player] = arr.splice(idx, 1);
+          return note ? Object.assign({}, player, { _injNote: note }) : player;
+        }
+      }
+      return null;
+    }).filter(Boolean);
+  }
+
+  const awayArrays = [awayRoster.forwards, awayRoster.defensemen, awayRoster.goalies];
+  const homeArrays = [homeRoster.forwards, homeRoster.defensemen, homeRoster.goalies];
+  awayRoster._scratched = _ap ? _extract(awayArrays, _ap.scratched || []) : [];
+  awayRoster._injured   = _ap ? _extract(awayArrays, _ap.injured   || []) : [];
+  homeRoster._scratched = _hp ? _extract(homeArrays, _hp.scratched || []) : [];
+  homeRoster._injured   = _hp ? _extract(homeArrays, _hp.injured   || []) : [];
 
   const isLive  = game.statusState === 'in';
   const isFinal = game.statusState === 'post';
@@ -1149,7 +1148,7 @@ function buildGameCard(game) {
   };
 
   // ── Roster column ──
-  const buildGroup = (players, label) => {
+  const buildGroup = (players, label, labelClass) => {
     if (!players.length) return '';
     const rows = players.map(p => {
       const name = playerName(p);
@@ -1157,6 +1156,8 @@ function buildGameCard(game) {
       const hand = p.hand?.type || '';
       const pos  = p.position?.abbreviation || '';
       const href = playerLink(p);
+      const injNote = p._injNote ? `<span class="player-inj-note">(${p._injNote})</span>` : '';
+      const liClass = p._injNote !== undefined ? ' out' : '';
       const fracs = `<span class="player-stats-inline">
         <span class="stat-frac" style="cursor:default;"
           onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>showShotsTooltip(this,${p.id}))"
@@ -1170,26 +1171,31 @@ function buildGameCard(game) {
           <span class="numer" id="spts-${p.id}">—</span><span class="denom" id="cpts-${p.id}">—</span>
         </span>
       </span>`;
-      return `<li class="roster-player">
+      return `<li class="roster-player${liClass}">
         <span class="jersey-num">#${num}</span>
         <a class="player-name-link" href="${href}" target="_blank"><span
           onmouseenter="Promise.all([fetchPlayerStats(${p.id}),fetchPtsRolling(${p.id})]).then(()=>onStatsLoaded(this,${p.id},false))"
-          onmouseleave="hideTooltip()">${name}</span></a>
+          onmouseleave="hideTooltip()">${name}</span></a>${injNote}
 
         ${fracs}
         <span class="player-pos">${pos}</span>
       </li>`;
     }).join('');
-    return `<li class="pos-group-label">${label}</li>${rows}`;
+    const lcAttr = labelClass ? ` class="${labelClass}"` : '';
+    return `<li class="pos-group-label"${lcAttr}>${label}</li>${rows}`;
   };
 
   const rosterCol = (roster, team) => {
-    if (!roster.forwards.length && !roster.defensemen.length && !roster.goalies.length)
+    const sc  = roster._scratched || [];
+    const inj = roster._injured   || [];
+    if (!roster.forwards.length && !roster.defensemen.length && !roster.goalies.length && !sc.length && !inj.length)
       return `<div class="tbd-roster">Roster unavailable</div>`;
     return `<ul class="roster-list">
       ${buildGroup(roster.forwards,   'Forwards')}
       ${buildGroup(roster.defensemen, 'Defense')}
       ${buildGroup(roster.goalies,    'Goalies')}
+      ${sc.length  ? buildGroup(sc,  'Scratched', 'scratched') : ''}
+      ${inj.length ? buildGroup(inj, 'Injured',   'injured')   : ''}
     </ul>`;
   };
 
@@ -1242,7 +1248,6 @@ function buildGameCard(game) {
     <a href="https://www.espn.com/nhl/game/_/gameId/${game.id}" target="_blank">ESPN Game Page</a>
     <a class="primary" href="https://www.espn.com/nhl/scoreboard" target="_blank">Scores</a>
   </div>
-  ${buildStatusSection(away, home)}
 </div>`;
 }
 
