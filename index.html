@@ -735,7 +735,8 @@ async function fetchPtsRolling(playerId) {
 
     // common/v3 gamelog: events keyed by event ID, labels + values arrays
     // ESPN may return d.labels (short: 'S') OR d.names (full: 'shotsOnGoal') — check both
-    const labels     = d.labels  || d.names  || [];
+    const labels = d.labels || d.names || [];
+    const names  = d.names  || d.labels || [];   // keep both so either lookup works
 
     const goalsIdx   = labels.findIndex(l => l === 'G'  || /^goals?$/i.test(l));
     const assistsIdx = labels.findIndex(l => l === 'A'  || /^assists?$/i.test(l));
@@ -778,9 +779,12 @@ async function fetchPtsRolling(playerId) {
         return ptsRollingCache[playerId];
       }
       if (reg?.categories?.length) {
+        // Pick the category with the MOST games — that's the full-season "total" bucket.
+        // Taking the first non-empty category can land on "November", "last5", etc.
+        let bestLen = 0;
         for (const cat of reg.categories) {
           const catEvents = toArray(cat?.events);
-          if (catEvents.length > 0) { games = catEvents; break; }
+          if (catEvents.length > bestLen) { games = catEvents; bestLen = catEvents.length; }
         }
       }
       if (!games.length) games = toArray(reg?.events);
