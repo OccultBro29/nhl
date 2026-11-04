@@ -514,6 +514,10 @@ function changeDate(delta) {
 updateDateDisplay();
 
 // ── Schedule parser ───────────────────────────────────────────────
+// Preferred abbreviations that differ from ESPN's default
+const ABBREV_FIXES = { SJ: 'SJS' };
+function fixAbbrev(a) { return ABBREV_FIXES[a] || a; }
+
 function parseEvent(ev) {
   const comp = ev.competitions?.[0] || {};
   // homeAway is reliably lowercase "home"/"away" in ESPN's NHL feed
@@ -533,8 +537,8 @@ function parseEvent(ev) {
   const tid = c => c.team?.id || c.id || '';
   return {
     id:           ev.id,
-    homeTeam:     { id: tid(home), abbrev: home.team?.abbreviation || '', logo: home.team?.logo || '', score: home.score ?? '', record: rec(home) },
-    awayTeam:     { id: tid(away), abbrev: away.team?.abbreviation || '', logo: away.team?.logo || '', score: away.score ?? '', record: rec(away) },
+    homeTeam:     { id: tid(home), abbrev: fixAbbrev(home.team?.abbreviation || ''), logo: home.team?.logo || '', score: home.score ?? '', record: rec(home) },
+    awayTeam:     { id: tid(away), abbrev: fixAbbrev(away.team?.abbreviation || ''), logo: away.team?.logo || '', score: away.score ?? '', record: rec(away) },
     venue:        comp.venue?.fullName || '',
     startDate:    ev.date || '',
     statusState:  status.type?.state || 'pre',
