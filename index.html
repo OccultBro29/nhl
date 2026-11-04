@@ -515,8 +515,10 @@ updateDateDisplay();
 
 // ── Schedule parser ───────────────────────────────────────────────
 // Preferred abbreviations that differ from ESPN's default
-const ABBREV_FIXES = { SJ: 'SJS' };
-function fixAbbrev(a) { return ABBREV_FIXES[a] || a; }
+const ABBREV_FIXES     = { SJ: 'SJS' };               // ESPN → preferred
+const ABBREV_ESPN_MAP  = { SJS: 'SJ' };               // preferred → ESPN (for API calls)
+function fixAbbrev(a)  { return ABBREV_FIXES[a]    || a; }
+function espnAbbrev(a) { return ABBREV_ESPN_MAP[a] || a; }
 
 function parseEvent(ev) {
   const comp = ev.competitions?.[0] || {};
@@ -553,7 +555,7 @@ async function fetchRoster(teamId) {
   const cached = rosterCache[teamId];
   if (cached && !cached.failed) return cached;
   try {
-    const d = await apiFetch(`${ESPN_NHL}/teams/${teamId}/roster`);
+    const d = await apiFetch(`${ESPN_NHL}/teams/${espnAbbrev(teamId)}/roster`);
     // ESPN wraps grouped athletes under either `athletes` or `roster`
     const arr = d.athletes || d.roster || [];
     let forwards = [], defensemen = [], goalies = [];
