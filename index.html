@@ -171,6 +171,7 @@
   .tbd-roster { color: var(--text-light); font-style: italic; font-size: 12px; padding: 8px 0; text-align: center; }
 
   /* ── Scratched / Injured inline labels ── */
+  .hat-window { font-size: 9px; font-weight: 700; opacity: 0.55; margin-right: 1px; text-transform: uppercase; letter-spacing: 0.3px; }
   .pos-group-label.scratched { color: #92400e; }
   .pos-group-label.injured   { color: #b91c1c; }
   .player-inj-note { font-size: 10px; color: #b45309; font-style: italic; margin-left: 4px; opacity: 0.85; }
@@ -819,14 +820,17 @@ async function fetchPtsRolling(playerId) {
       for (const st of (src.seasonTypes || [])) {
         const stName = st.type || st.displayName || st.name || '';
         if (!/regular/i.test(stName)) continue;
+        // Pick the category with the most games (the full-season total bucket)
+        let bestEvts = [], bestLen = 0;
         for (const cat of (st.categories || [])) {
           const evts = toArray(cat?.events);
-          if (evts.length > 0) {
-            careerShots += evts.reduce((sum, e) => sum + getShots(e), 0);
-            careerPts   += evts.reduce((sum, e) => sum + getPts(e),   0);
-            careerGP    += evts.length;
-            break; // first category per season = full-season totals; skip splits
-          }
+          if (evts.length > bestLen) { bestEvts = evts; bestLen = evts.length; }
+        }
+        if (!bestEvts.length) bestEvts = toArray(st?.events);
+        if (bestEvts.length > 0) {
+          careerShots += bestEvts.reduce((sum, e) => sum + getShots(e), 0);
+          careerPts   += bestEvts.reduce((sum, e) => sum + getPts(e),   0);
+          careerGP    += bestEvts.length;
         }
       }
     };
@@ -1327,12 +1331,19 @@ function hideTooltip() {
 // ── PTS rolling tooltip (on PTS fraction hover) ───────────────────
 function showPtsRolling(el, playerId) {
   const tip    = document.getElementById('pts-rolling-tooltip');
+  const stats  = playerStatsCache[playerId];
   const recent = ptsRollingCache[playerId];
   if (!recent || recent.failed) return;
 
-  // Season PPG and career PPG from gamelog totals
-  const sPPG = recent.seasonGP  > 0 ? (recent.seasonPts  / recent.seasonGP ).toFixed(2) : '—';
-  const cPPG = recent.careerGP  > 0 ? (recent.careerPts  / recent.careerGP ).toFixed(2) : '—';
+  // Use the stats-endpoint totals for PPG — they carry the correct GP count and
+  // full career history, unlike the gamelog which may be missing games or prior seasons.
+  const sGP  = +(stats?.sGP  ?? 0);
+  const sPTS = +(stats?.sPTS ?? 0);
+  const cGP  = +(stats?.cGP  ?? 0);
+  const cPTS = +(stats?.cPTS ?? 0);
+
+  const sPPG = sGP > 0 ? (sPTS / sGP).toFixed(2) : '—';
+  const cPPG = cGP > 0 ? (cPTS / cGP).toFixed(2) : '—';
 
   const fracHtml = sPPG === '—' ? '' :
     cPPG !== '—'
@@ -1340,7 +1351,7 @@ function showPtsRolling(el, playerId) {
       : `<span class="tooltip-frac"><span class="tn">${sPPG}</span><span class="td">PPG</span></span>`;
 
   tip.innerHTML = fracHtml +
-    `<span class="hat-recent">${recent.l7} / ${recent.l15} / ${recent.l30}</span>`;
+    `<span class="hat-recent"><span class="hat-window">L7</span>${recent.l7} <span class="hat-window">L15</span>${recent.l15} <span class="hat-window">L30</span>${recent.l30}</span>`;
 
   tip.style.top  = '-9999px';
   tip.style.left = '-9999px';
