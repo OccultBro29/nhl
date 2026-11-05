@@ -1369,7 +1369,7 @@ function showPtsRolling(el, playerId) {
   tip.classList.add('visible');
   const rect    = el.getBoundingClientRect();
   const tipRect = tip.getBoundingClientRect();
-  tip.style.left = Math.max(4, rect.left + rect.width / 2 - tipRect.width / 2) + 'px';
+  tip.style.left = Math.max(4, rect.left + rect.width / 2 - tipRect.width / 2 - 30) + 'px';
   tip.style.top  = (rect.top - tipRect.height - 4) + 'px';
 }
 
