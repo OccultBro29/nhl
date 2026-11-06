@@ -787,13 +787,18 @@ async function fetchPtsRolling(playerId) {
         return ptsRollingCache[playerId];
       }
       if (reg?.categories?.length) {
-        // Pick the category with the MOST games — that's the full-season "total" bucket.
-        // Taking the first non-empty category can land on "November", "last5", etc.
-        let bestLen = 0;
+        // Merge ALL categories and deduplicate by eventId.
+        // ESPN splits games into monthly buckets (October, November…) with no single
+        // "total" bucket, so picking the largest category skips the current month.
+        // Deduplication handles home/away splits that share the same event IDs.
+        const seen = new Map();
         for (const cat of reg.categories) {
-          const catEvents = toArray(cat?.events);
-          if (catEvents.length > bestLen) { games = catEvents; bestLen = catEvents.length; }
+          for (const e of toArray(cat?.events)) {
+            const id = e.eventId || e.id;
+            if (id && !seen.has(id)) seen.set(id, e);
+          }
         }
+        if (seen.size > 0) games = [...seen.values()].sort((a, b) => +(b.eventId||0) - +(a.eventId||0));
       }
       if (!games.length) games = toArray(reg?.events);
     }
@@ -827,13 +832,15 @@ async function fetchPtsRolling(playerId) {
       for (const st of (src.seasonTypes || [])) {
         const stName = st.type || st.displayName || st.name || '';
         if (!/regular/i.test(stName)) continue;
-        // Pick the category with the most games (the full-season total bucket)
-        let bestEvts = [], bestLen = 0;
+        // Merge and deduplicate all monthly/split categories for this season
+        const seen = new Map();
         for (const cat of (st.categories || [])) {
-          const evts = toArray(cat?.events);
-          if (evts.length > bestLen) { bestEvts = evts; bestLen = evts.length; }
+          for (const e of toArray(cat?.events)) {
+            const id = e.eventId || e.id;
+            if (id && !seen.has(id)) seen.set(id, e);
+          }
         }
-        if (!bestEvts.length) bestEvts = toArray(st?.events);
+        const bestEvts = seen.size > 0 ? [...seen.values()] : toArray(st?.events);
         if (bestEvts.length > 0) {
           careerShots += bestEvts.reduce((sum, e) => sum + getShots(e), 0);
           careerPts   += bestEvts.reduce((sum, e) => sum + getPts(e),   0);
@@ -1128,6 +1135,29 @@ function buildGameCard(game) {
   awayRoster._injured   = _ap ? _extract(awayArrays, _ap.injured   || []) : [];
   homeRoster._scratched = _hp ? _extract(homeArrays, _hp.scratched || []) : [];
   homeRoster._injured   = _hp ? _extract(homeArrays, _hp.injured   || []) : [];
+
+  // Any player still in the roster arrays but absent from the projection
+  // (not a starter, not explicitly scratched/injured) is an implicit scratch.
+  function _pullUnaccounted(roster, proj) {
+    if (!proj) return;
+    const projNames = [
+      ...(proj.forwards  || []),
+      ...(proj.defense   || []),
+      proj.startingGoalie, proj.backupGoalie,
+    ].filter(Boolean);
+    const inProj = p => {
+      const nf = normName(playerName(p)), nl = lastN(playerName(p));
+      return projNames.some(pn => normName(pn) === nf || lastN(pn) === nl);
+    };
+    for (const group of ['forwards', 'defensemen', 'goalies']) {
+      const keep = [], extra = [];
+      for (const p of roster[group]) (inProj(p) ? keep : extra).push(p);
+      roster[group]    = keep;
+      roster._scratched = [...roster._scratched, ...extra];
+    }
+  }
+  _pullUnaccounted(awayRoster, _ap);
+  _pullUnaccounted(homeRoster, _hp);
 
   const isLive  = game.statusState === 'in';
   const isFinal = game.statusState === 'post';
