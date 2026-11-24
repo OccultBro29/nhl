@@ -416,7 +416,7 @@ function applyPastedLineups() {
 
   const parsed = parseLineupText(text);
   const teams = Object.keys(parsed);
-  console.log('[paste] parsed teams:', teams, parsed);
+
 
   if (!teams.length) {
     statusEl.innerHTML = 'No "projected lineup" sections found.<br>'
